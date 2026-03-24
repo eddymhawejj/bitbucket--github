@@ -1,0 +1,35 @@
+services:
+  # One-time bulk migration
+  migrate:
+    build: .
+    command: ["migrate", "--config", "/config/config.yaml"]
+    volumes:
+      - ./config:/config:ro
+      - mirror-data:/data/mirror
+      - ${SSH_KEY_PATH:-~/.ssh}:/root/.ssh:ro
+    profiles:
+      - migrate
+
+  # Continuous sync (runs as a long-lived service)
+  sync:
+    build: .
+    command: ["sync", "--config", "/config/config.yaml"]
+    volumes:
+      - ./config:/config:ro
+      - mirror-data:/data/mirror
+      - ${SSH_KEY_PATH:-~/.ssh}:/root/.ssh:ro
+    restart: unless-stopped
+
+  # PR migration (one-time)
+  migrate-prs:
+    build: .
+    command: ["migrate-prs", "--config", "/config/config.yaml"]
+    volumes:
+      - ./config:/config:ro
+      - mirror-data:/data/mirror
+      - ${SSH_KEY_PATH:-~/.ssh}:/root/.ssh:ro
+    profiles:
+      - migrate-prs
+
+volumes:
+  mirror-data:

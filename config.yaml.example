@@ -1,0 +1,31 @@
+bitbucket:
+  # Bitbucket Server base URL (no trailing slash)
+  base_url: "https://bitbucket.mycompany.com"
+  # Personal access token for REST API calls
+  token: "YOUR_BITBUCKET_TOKEN"
+  # SSH base URL for git clone operations
+  ssh_url: "ssh://git@bitbucket.mycompany.com:7999"
+  # Optional: limit migration to specific projects (omit to migrate all)
+  # projects:
+  #   - PROJ1
+  #   - PROJ2
+
+github:
+  # GitHub Enterprise API base URL
+  base_url: "https://github.mycompany.com/api/v3"
+  # Personal access token with repo + admin:org scopes
+  token: "YOUR_GITHUB_TOKEN"
+  # Target organization on GitHub
+  org: "my-org"
+
+sync:
+  # Sync interval in seconds
+  interval_seconds: 60
+  # Local directory for bare repo clones
+  work_dir: "/data/mirror"
+
+# Optional: map Bitbucket usernames to GitHub usernames
+# Used for PR reviewer assignments
+# user_mapping:
+#   bb_user1: gh_user1
+#   bb_user2: gh_user2
