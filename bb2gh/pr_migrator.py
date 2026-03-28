@@ -73,14 +73,20 @@ def migrate_pull_requests(config, dry_run=False):
     migrated_repos = state.get_migrated_repos()
     if not migrated_repos:
         logger.warning("No migrated repos found. Run 'bb2gh migrate' first.")
-        return
+        return 0, 0, 0
 
     total_migrated = 0
     total_skipped = 0
     total_failed = 0
 
     for project_key, repo_slug in migrated_repos:
-        logger.info("Processing PRs for %s/%s", project_key, repo_slug)
+        # Look up the GitHub target for this repo
+        gh_org, gh_repo_name = state.get_github_target(project_key, repo_slug)
+        if not gh_org or not gh_repo_name:
+            # Fallback: resolve from config (for repos migrated before mapping was added)
+            gh_org, gh_repo_name = config.resolve_target(project_key, repo_slug)
+
+        logger.info("Processing PRs for %s/%s -> %s/%s", project_key, repo_slug, gh_org, gh_repo_name)
 
         try:
             open_prs = bb.list_pull_requests(project_key, repo_slug, state="OPEN")
@@ -102,15 +108,16 @@ def migrate_pull_requests(config, dry_run=False):
 
             if dry_run:
                 logger.info(
-                    "[DRY RUN] Would migrate PR #%d: %s (%s -> %s)",
-                    pr_id, title, head_branch, base_branch,
+                    "[DRY RUN] Would migrate PR #%d: %s (%s -> %s) to %s/%s",
+                    pr_id, title, head_branch, base_branch, gh_org, gh_repo_name,
                 )
                 total_migrated += 1
                 continue
 
             try:
                 _migrate_single_pr(
-                    config, bb, gh, state, project_key, repo_slug, pr
+                    config, bb, gh, state, project_key, repo_slug,
+                    gh_org, gh_repo_name, pr,
                 )
                 total_migrated += 1
             except Exception:
@@ -126,23 +133,27 @@ def migrate_pull_requests(config, dry_run=False):
     return total_migrated, total_skipped, total_failed
 
 
-def _migrate_single_pr(config, bb, gh, state, project_key, repo_slug, pr):
+def _migrate_single_pr(config, bb, gh, state, project_key, repo_slug, gh_org, gh_repo_name, pr):
     """Migrate a single pull request."""
     pr_id = pr["id"]
     title = pr["title"]
     head_branch = pr["fromRef"]["displayId"]
     base_branch = pr["toRef"]["displayId"]
 
-    logger.info("Migrating PR #%d: %s (%s -> %s)", pr_id, title, head_branch, base_branch)
+    logger.info(
+        "Migrating PR #%d: %s (%s -> %s) to %s/%s",
+        pr_id, title, head_branch, base_branch, gh_org, gh_repo_name,
+    )
 
-    # Create PR on GitHub
+    # Create PR on GitHub (in the correct org)
     body = _format_pr_body(pr, config)
     gh_pr = gh.create_pull_request(
-        repo_name=repo_slug,
+        repo_name=gh_repo_name,
         title=title,
         body=body,
         head=head_branch,
         base=base_branch,
+        org_name=gh_org,
     )
 
     # Migrate comments
@@ -152,18 +163,18 @@ def _migrate_single_pr(config, bb, gh, state, project_key, repo_slug, pr):
         action = activity.get("action", "")
         if action == "COMMENTED" and "comment" in activity:
             comment_body = _format_comment(activity, config)
-            gh.add_pr_comment(repo_slug, gh_pr.number, comment_body)
+            gh.add_pr_comment(gh_repo_name, gh_pr.number, comment_body, org_name=gh_org)
             comment_count += 1
 
     # Assign reviewers (best effort)
     reviewers = _map_reviewers(pr, config)
     if reviewers:
-        gh.add_pr_reviewers(repo_slug, gh_pr.number, reviewers)
+        gh.add_pr_reviewers(gh_repo_name, gh_pr.number, reviewers, org_name=gh_org)
 
     # Record mapping
     state.record_pr_mapping(project_key, repo_slug, pr_id, gh_pr.number)
 
     logger.info(
-        "Migrated PR #%d -> GitHub PR #%d (%d comments, %d reviewers)",
-        pr_id, gh_pr.number, comment_count, len(reviewers),
+        "Migrated PR #%d -> GitHub PR #%d on %s/%s (%d comments, %d reviewers)",
+        pr_id, gh_pr.number, gh_org, gh_repo_name, comment_count, len(reviewers),
     )

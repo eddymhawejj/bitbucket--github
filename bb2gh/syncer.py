@@ -110,6 +110,10 @@ class Syncer:
             logger.error("Bare repo not found: %s", bare_path)
             return
 
+        # Look up the GitHub target from state (set during migration)
+        gh_org, gh_repo_name = self.state.get_github_target(project_key, repo_slug)
+        target_label = f"{gh_org}/{gh_repo_name}" if gh_org else "github"
+
         start = time.time()
 
         # Fetch from Bitbucket (origin)
@@ -123,4 +127,7 @@ class Syncer:
 
         elapsed = time.time() - start
         self.state.update_sync_time(project_key, repo_slug)
-        logger.info("Synced %s/%s in %.1fs", project_key, repo_slug, elapsed)
+        logger.info(
+            "Synced %s/%s -> %s in %.1fs",
+            project_key, repo_slug, target_label, elapsed,
+        )

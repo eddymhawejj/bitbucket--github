@@ -24,6 +24,8 @@ def mock_config(tmp_path):
     config.gh_org = "my-org"
     config.work_dir = str(tmp_path)
     config.user_mapping = {}
+    # Default resolve_target returns the default org with slug as name
+    config.resolve_target = MagicMock(side_effect=lambda proj, slug: ("my-org", slug))
     return config
 
 
@@ -83,7 +85,53 @@ class TestMigrateRepos:
         assert migrated == 1
         assert skipped == 0
         assert failed == 0
-        state_instance.mark_migrated.assert_called_once_with("PROJ1", "my-repo")
+        # resolve_target should be called to determine the GitHub org and repo name
+        mock_config.resolve_target.assert_called_once_with("PROJ1", "my-repo")
+        # State should record with org and repo name
+        state_instance.mark_migrated.assert_called_once_with(
+            "PROJ1", "my-repo", gh_org="my-org", gh_repo_name="my-repo"
+        )
+
+    @patch("bb2gh.migrator.State")
+    @patch("bb2gh.migrator.GithubClient")
+    @patch("bb2gh.migrator.BitbucketClient")
+    @patch("bb2gh.migrator._run_git")
+    def test_migrates_to_mapped_org(self, mock_git, MockBB, MockGH, MockState, mock_config):
+        """Test that repos are migrated to the correct org when mapping is configured."""
+        # Override resolve_target to return a different org
+        mock_config.resolve_target = MagicMock(
+            side_effect=lambda proj, slug: ("infra-team", f"infra-{slug}")
+        )
+
+        bb_instance = MockBB.return_value
+        bb_instance.list_repos.return_value = [
+            {
+                "slug": "my-repo",
+                "name": "My Repo",
+                "description": "A test repo",
+                "links": {"clone": [{"name": "ssh", "href": "ssh://git@bb:7999/proj1/my-repo.git"}]},
+            }
+        ]
+
+        gh_instance = MockGH.return_value
+        gh_instance.get_clone_url.return_value = "https://github.example.com/infra-team/infra-my-repo.git"
+
+        state_instance = MockState.return_value
+        state_instance.is_migrated.return_value = False
+
+        mock_git.return_value = ""
+
+        migrated, skipped, failed = migrate_repos(mock_config)
+
+        assert migrated == 1
+        # GitHub repo should be created with the mapped name and org
+        gh_instance.create_repo.assert_called_once_with(
+            "infra-my-repo", description="A test repo", private=True, org_name="infra-team"
+        )
+        gh_instance.get_clone_url.assert_called_once_with("infra-my-repo", org_name="infra-team")
+        state_instance.mark_migrated.assert_called_once_with(
+            "PROJ1", "my-repo", gh_org="infra-team", gh_repo_name="infra-my-repo"
+        )
 
     @patch("bb2gh.migrator.State")
     @patch("bb2gh.migrator.GithubClient")

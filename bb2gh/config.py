@@ -35,6 +35,48 @@ class Config:
         # User mapping (Bitbucket username -> GitHub username)
         self.user_mapping = raw.get("user_mapping", {})
 
+        # Repository mapping (Bitbucket project/repo -> GitHub org/repo)
+        rm = raw.get("repo_mapping", {})
+        self._repo_mapping = rm
+        self._name_template = rm.get("name_template", "{slug}")
+        self._project_mappings = rm.get("projects", {})
+
+    def resolve_target(self, project_key, repo_slug):
+        """Resolve a Bitbucket project/repo to a GitHub org and repo name.
+
+        Lookup order:
+        1. Explicit per-repo override in repo_mapping.projects.<KEY>.repos.<slug>.github_name
+        2. Per-project name_template override in repo_mapping.projects.<KEY>.name_template
+        3. Global name_template from repo_mapping.name_template (default: "{slug}")
+
+        For the org:
+        1. Per-project github_org in repo_mapping.projects.<KEY>.github_org
+        2. Global github.org
+
+        Returns:
+            (github_org, github_repo_name) tuple
+        """
+        project_conf = self._project_mappings.get(project_key, {})
+
+        # Resolve org
+        gh_org = project_conf.get("github_org", self.gh_org)
+
+        # Resolve repo name: check explicit per-repo override first
+        repos_conf = project_conf.get("repos", {})
+        if repo_slug in repos_conf:
+            repo_conf = repos_conf[repo_slug]
+            gh_repo = repo_conf.get("github_name", repo_slug)
+        else:
+            # Use per-project template, falling back to global template
+            template = project_conf.get("name_template", self._name_template)
+            gh_repo = template.format(
+                project=project_key,
+                project_lower=project_key.lower(),
+                slug=repo_slug,
+            )
+
+        return gh_org, gh_repo
+
     @staticmethod
     def _validate(raw):
         for section in ("bitbucket", "github"):

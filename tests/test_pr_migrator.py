@@ -23,6 +23,7 @@ def mock_config():
     config.gh_org = "my-org"
     config.work_dir = "/tmp/test"
     config.user_mapping = {"john.doe": "johndoe"}
+    config.resolve_target = MagicMock(return_value=("my-org", "my-repo"))
     return config
 
 
@@ -105,6 +106,7 @@ class TestMigratePullRequests:
     def test_dry_run(self, MockBB, MockGH, MockState, mock_config, sample_pr):
         state_instance = MockState.return_value
         state_instance.get_migrated_repos.return_value = [("PROJ", "my-repo")]
+        state_instance.get_github_target.return_value = ("my-org", "my-repo")
         state_instance.is_pr_migrated.return_value = False
 
         bb_instance = MockBB.return_value
@@ -125,6 +127,7 @@ class TestMigratePullRequests:
     def test_skips_already_migrated(self, MockBB, MockGH, MockState, mock_config, sample_pr):
         state_instance = MockState.return_value
         state_instance.get_migrated_repos.return_value = [("PROJ", "my-repo")]
+        state_instance.get_github_target.return_value = ("my-org", "my-repo")
         state_instance.is_pr_migrated.return_value = True
 
         bb_instance = MockBB.return_value
@@ -141,6 +144,7 @@ class TestMigratePullRequests:
     def test_migrates_pr_with_comments(self, MockBB, MockGH, MockState, mock_config, sample_pr):
         state_instance = MockState.return_value
         state_instance.get_migrated_repos.return_value = [("PROJ", "my-repo")]
+        state_instance.get_github_target.return_value = ("my-org", "my-repo")
         state_instance.is_pr_migrated.return_value = False
 
         bb_instance = MockBB.return_value
@@ -166,11 +170,71 @@ class TestMigratePullRequests:
         assert migrated == 1
         assert failed == 0
 
-        # Verify PR was created
+        # Verify PR was created with correct org
         MockGH.return_value.create_pull_request.assert_called_once()
+        call_kwargs = MockGH.return_value.create_pull_request.call_args
+        assert call_kwargs[1]["org_name"] == "my-org"
+        assert call_kwargs[1]["repo_name"] == "my-repo"
 
         # Verify comment was added (only 1 — the APPROVED activity is skipped)
         MockGH.return_value.add_pr_comment.assert_called_once()
 
         # Verify state recorded
         state_instance.record_pr_mapping.assert_called_once_with("PROJ", "my-repo", 42, 99)
+
+    @patch("bb2gh.pr_migrator.State")
+    @patch("bb2gh.pr_migrator.GithubClient")
+    @patch("bb2gh.pr_migrator.BitbucketClient")
+    def test_uses_mapped_org_for_pr(self, MockBB, MockGH, MockState, mock_config, sample_pr):
+        """Test that PRs are created in the correct mapped org."""
+        state_instance = MockState.return_value
+        state_instance.get_migrated_repos.return_value = [("PROJ", "my-repo")]
+        # Simulate a repo migrated to a different org
+        state_instance.get_github_target.return_value = ("infra-team", "infra-my-repo")
+        state_instance.is_pr_migrated.return_value = False
+
+        bb_instance = MockBB.return_value
+        bb_instance.list_pull_requests.return_value = [sample_pr]
+        bb_instance.get_pr_activities.return_value = []
+
+        mock_pr = MagicMock()
+        mock_pr.number = 5
+        MockGH.return_value.create_pull_request.return_value = mock_pr
+
+        migrated, skipped, failed = migrate_pull_requests(mock_config, dry_run=False)
+
+        assert migrated == 1
+
+        # Verify PR was created in the mapped org with the mapped repo name
+        call_kwargs = MockGH.return_value.create_pull_request.call_args
+        assert call_kwargs[1]["org_name"] == "infra-team"
+        assert call_kwargs[1]["repo_name"] == "infra-my-repo"
+
+    @patch("bb2gh.pr_migrator.State")
+    @patch("bb2gh.pr_migrator.GithubClient")
+    @patch("bb2gh.pr_migrator.BitbucketClient")
+    def test_fallback_to_config_resolve(self, MockBB, MockGH, MockState, mock_config, sample_pr):
+        """Test fallback to config.resolve_target when state has no GitHub target."""
+        state_instance = MockState.return_value
+        state_instance.get_migrated_repos.return_value = [("PROJ", "my-repo")]
+        # Simulate old state without gh_org/gh_repo_name
+        state_instance.get_github_target.return_value = (None, None)
+        state_instance.is_pr_migrated.return_value = False
+
+        mock_config.resolve_target.return_value = ("fallback-org", "fallback-repo")
+
+        bb_instance = MockBB.return_value
+        bb_instance.list_pull_requests.return_value = [sample_pr]
+        bb_instance.get_pr_activities.return_value = []
+
+        mock_pr = MagicMock()
+        mock_pr.number = 10
+        MockGH.return_value.create_pull_request.return_value = mock_pr
+
+        migrated, _, _ = migrate_pull_requests(mock_config, dry_run=False)
+
+        assert migrated == 1
+        mock_config.resolve_target.assert_called_once_with("PROJ", "my-repo")
+        call_kwargs = MockGH.return_value.create_pull_request.call_args
+        assert call_kwargs[1]["org_name"] == "fallback-org"
+        assert call_kwargs[1]["repo_name"] == "fallback-repo"

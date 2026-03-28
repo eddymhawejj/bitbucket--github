@@ -31,19 +31,28 @@ class State:
     def _now(self):
         return datetime.now(timezone.utc).isoformat()
 
-    def mark_migrated(self, project_key, repo_slug):
-        """Record that a repo has been migrated."""
+    def mark_migrated(self, project_key, repo_slug, gh_org=None, gh_repo_name=None):
+        """Record that a repo has been migrated.
+
+        Args:
+            project_key: Bitbucket project key.
+            repo_slug: Bitbucket repo slug.
+            gh_org: GitHub organization the repo was migrated to.
+            gh_repo_name: GitHub repository name.
+        """
         key = f"{project_key}/{repo_slug}"
         self._data["repos"][key] = {
             "project_key": project_key,
             "repo_slug": repo_slug,
+            "gh_org": gh_org,
+            "gh_repo_name": gh_repo_name or repo_slug,
             "status": "migrated",
             "migrated_at": self._now(),
             "last_sync": self._now(),
             "pr_mappings": {},
         }
         self._save()
-        logger.info("Marked %s as migrated", key)
+        logger.info("Marked %s as migrated -> %s/%s", key, gh_org, gh_repo_name)
 
     def update_sync_time(self, project_key, repo_slug):
         """Update the last sync timestamp for a repo."""
@@ -66,6 +75,16 @@ class State:
             if entry["status"] == "migrated":
                 result.append((entry["project_key"], entry["repo_slug"]))
         return result
+
+    def get_github_target(self, project_key, repo_slug):
+        """Get the GitHub org and repo name for a migrated repo.
+
+        Returns:
+            (gh_org, gh_repo_name) tuple, or (None, None) if not found.
+        """
+        key = f"{project_key}/{repo_slug}"
+        entry = self._data["repos"].get(key, {})
+        return entry.get("gh_org"), entry.get("gh_repo_name")
 
     def is_migrated(self, project_key, repo_slug):
         """Check if a repo has been migrated."""

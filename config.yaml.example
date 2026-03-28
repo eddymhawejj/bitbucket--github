@@ -1,7 +1,7 @@
 bitbucket:
   # Bitbucket Server base URL (no trailing slash)
   base_url: "https://bitbucket.mycompany.com"
-  # Personal access token for REST API calls
+  # Personal access token for REST API calls (or set BB_TOKEN env var)
   token: "YOUR_BITBUCKET_TOKEN"
   # SSH base URL for git clone operations
   ssh_url: "ssh://git@bitbucket.mycompany.com:7999"
@@ -13,9 +13,9 @@ bitbucket:
 github:
   # GitHub Enterprise API base URL
   base_url: "https://github.mycompany.com/api/v3"
-  # Personal access token with repo + admin:org scopes
+  # Personal access token with repo + admin:org scopes (or set GH_TOKEN env var)
   token: "YOUR_GITHUB_TOKEN"
-  # Target organization on GitHub
+  # Default target organization on GitHub (used when no project-specific mapping exists)
   org: "my-org"
 
 sync:
@@ -24,8 +24,31 @@ sync:
   # Local directory for bare repo clones
   work_dir: "/data/mirror"
 
+# Optional: map Bitbucket projects/repos to specific GitHub orgs/repo names.
+# Without this section, all repos go to github.org with their original slug as name.
+repo_mapping:
+  # Default naming template for GitHub repos.
+  # Available variables: {project}, {project_lower}, {slug}
+  # Default: "{slug}" (just the Bitbucket repo slug)
+  name_template: "{project_lower}-{slug}"
+
+  # Per-project overrides
+  projects:
+    INFRA:
+      # Send INFRA repos to a different GitHub org
+      github_org: "infra-team"
+      # Optional: override the name template for this project only
+      # name_template: "{slug}"
+      repos:
+        # Optional: explicit per-repo name overrides
+        legacy-monolith:
+          github_name: "infra-monolith"
+    PLATFORM:
+      github_org: "platform-eng"
+    # Projects not listed here use github.org and the global name_template
+
 # Optional: map Bitbucket usernames to GitHub usernames
-# Used for PR reviewer assignments
+# Used for PR author attribution and reviewer assignments
 # user_mapping:
 #   bb_user1: gh_user1
 #   bb_user2: gh_user2

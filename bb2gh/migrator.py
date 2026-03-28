@@ -50,11 +50,12 @@ def migrate_repos(config):
     """Run the full bulk migration.
 
     For each repo in Bitbucket:
-    1. Create the repo on GitHub
-    2. Bare-clone from Bitbucket via SSH
-    3. Clean hidden refs
-    4. Push --mirror to GitHub
-    5. Record in state
+    1. Resolve the target GitHub org and repo name via config mapping
+    2. Create the repo on GitHub
+    3. Bare-clone from Bitbucket via SSH
+    4. Clean hidden refs
+    5. Push --mirror to GitHub
+    6. Record in state
     """
     bb = BitbucketClient(config.bb_base_url, config.bb_token)
     gh = GithubClient(config.gh_base_url, config.gh_token, config.gh_org)
@@ -99,11 +100,16 @@ def migrate_repos(config):
 
 def _migrate_single_repo(config, bb, gh, state, project_key, repo_slug, repo_name, repo):
     """Migrate a single repository."""
-    logger.info("Migrating %s/%s ...", project_key, repo_slug)
+    # Resolve target GitHub org and repo name
+    gh_org, gh_repo_name = config.resolve_target(project_key, repo_slug)
+    logger.info(
+        "Migrating %s/%s -> %s/%s ...",
+        project_key, repo_slug, gh_org, gh_repo_name,
+    )
 
-    # 1. Create repo on GitHub
+    # 1. Create repo on GitHub (in the resolved org)
     description = repo.get("description", "") or f"Migrated from Bitbucket: {project_key}/{repo_slug}"
-    gh.create_repo(repo_slug, description=description, private=True)
+    gh.create_repo(gh_repo_name, description=description, private=True, org_name=gh_org)
 
     # 2. Bare clone from Bitbucket
     bare_path = os.path.join(config.work_dir, f"{project_key}__{repo_slug}.git")
@@ -125,7 +131,7 @@ def _migrate_single_repo(config, bb, gh, state, project_key, repo_slug, repo_nam
     _clean_hidden_refs(bare_path)
 
     # 4. Add GitHub remote and push
-    gh_clone_url = gh.get_clone_url(repo_slug)
+    gh_clone_url = gh.get_clone_url(gh_repo_name, org_name=gh_org)
 
     # Remove existing github remote if present, then add
     try:
@@ -136,6 +142,6 @@ def _migrate_single_repo(config, bb, gh, state, project_key, repo_slug, repo_nam
     _run_git(["remote", "add", "github", gh_clone_url], cwd=bare_path)
     _run_git(["push", "--mirror", "github"], cwd=bare_path)
 
-    # 5. Record in state
-    state.mark_migrated(project_key, repo_slug)
-    logger.info("Successfully migrated %s/%s", project_key, repo_slug)
+    # 5. Record in state (includes the resolved GitHub org and repo name)
+    state.mark_migrated(project_key, repo_slug, gh_org=gh_org, gh_repo_name=gh_repo_name)
+    logger.info("Successfully migrated %s/%s -> %s/%s", project_key, repo_slug, gh_org, gh_repo_name)

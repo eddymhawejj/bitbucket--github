@@ -28,6 +28,7 @@ class TestSyncer:
 
         state_instance = MockState.return_value
         state_instance.get_migrated_repos.return_value = [("PROJ", "my-repo")]
+        state_instance.get_github_target.return_value = ("my-org", "my-repo")
 
         mock_git.return_value = ""
 
@@ -62,6 +63,7 @@ class TestSyncer:
             ("PROJ", "repo1"),
             ("PROJ", "repo2"),
         ]
+        state_instance.get_github_target.return_value = ("my-org", "repo1")
 
         # First repo fetch fails, second succeeds
         def side_effect(args, cwd=None):
@@ -76,3 +78,21 @@ class TestSyncer:
 
         # repo2 should still be synced
         state_instance.update_sync_time.assert_called_once_with("PROJ", "repo2")
+
+    @patch("bb2gh.syncer.State")
+    @patch("bb2gh.syncer._run_git")
+    def test_sync_logs_github_target(self, mock_git, MockState, mock_config, tmp_path):
+        """Test that sync uses the stored GitHub target for logging."""
+        bare_path = tmp_path / "INFRA__my-service.git"
+        bare_path.mkdir()
+
+        state_instance = MockState.return_value
+        state_instance.get_migrated_repos.return_value = [("INFRA", "my-service")]
+        state_instance.get_github_target.return_value = ("infra-team", "infra-my-service")
+
+        mock_git.return_value = ""
+
+        syncer = Syncer(mock_config)
+        syncer._sync_all()
+
+        state_instance.get_github_target.assert_called_once_with("INFRA", "my-service")
