@@ -39,12 +39,23 @@ repo_mapping:
       github_org: "infra-team"
       # Optional: override the name template for this project only
       # name_template: "{slug}"
+      #
+      # Optional: migrate ONLY these repos from INFRA (allowlist).
+      # If set, all other repos in this project are skipped.
+      # include_repos:
+      #   - my-service
+      #   - my-api
       repos:
         # Optional: explicit per-repo name overrides
         legacy-monolith:
           github_name: "infra-monolith"
     PLATFORM:
       github_org: "platform-eng"
+      # Optional: migrate all repos EXCEPT these (denylist).
+      # Ignored if include_repos is set.
+      # exclude_repos:
+      #   - deprecated-tool
+      #   - archived-spike
     # Projects not listed here use github.org and the global name_template
 
 # Optional: map Bitbucket usernames to GitHub usernames

@@ -26,6 +26,8 @@ def mock_config(tmp_path):
     config.user_mapping = {}
     # Default resolve_target returns the default org with slug as name
     config.resolve_target = MagicMock(side_effect=lambda proj, slug: ("my-org", slug))
+    # Default: no filtering — all repos migrate
+    config.should_migrate_repo = MagicMock(return_value=True)
     return config
 
 
@@ -148,3 +150,41 @@ class TestMigrateRepos:
         assert migrated == 0
         assert skipped == 1
         assert failed == 0
+
+    @patch("bb2gh.migrator.State")
+    @patch("bb2gh.migrator.GithubClient")
+    @patch("bb2gh.migrator.BitbucketClient")
+    @patch("bb2gh.migrator._run_git")
+    def test_respects_repo_filter(self, mock_git, MockBB, MockGH, MockState, mock_config):
+        """Test that repos filtered out by include/exclude_repos are skipped."""
+        # Only allow "keep-me" through the filter
+        mock_config.should_migrate_repo = MagicMock(
+            side_effect=lambda proj, slug: slug == "keep-me"
+        )
+
+        bb_instance = MockBB.return_value
+        bb_instance.list_repos.return_value = [
+            {"slug": "keep-me", "name": "Keep",
+             "links": {"clone": [{"name": "ssh", "href": "ssh://bb/p/keep-me.git"}]}},
+            {"slug": "skip-me", "name": "Skip"},
+            {"slug": "skip-also", "name": "Skip Also"},
+        ]
+
+        gh_instance = MockGH.return_value
+        gh_instance.get_clone_url.return_value = "https://github/my-org/keep-me.git"
+
+        state_instance = MockState.return_value
+        state_instance.is_migrated.return_value = False
+
+        mock_git.return_value = ""
+
+        migrated, skipped, failed = migrate_repos(mock_config)
+
+        assert migrated == 1
+        assert skipped == 2  # two filtered out
+        assert failed == 0
+        # Only the allowed repo gets created on GitHub
+        gh_instance.create_repo.assert_called_once()
+        state_instance.mark_migrated.assert_called_once_with(
+            "PROJ1", "keep-me", gh_org="my-org", gh_repo_name="keep-me"
+        )

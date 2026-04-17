@@ -77,6 +77,27 @@ class Config:
 
         return gh_org, gh_repo
 
+    def should_migrate_repo(self, project_key, repo_slug):
+        """Check if a repo should be migrated based on include/exclude lists.
+
+        Resolution:
+        - If `include_repos` is set for the project, the repo is migrated only
+          if it is in that list (allowlist).
+        - Otherwise, the repo is migrated unless it is in `exclude_repos`
+          (denylist).
+        - Projects with no repo filter config migrate all repos.
+
+        Returns:
+            True if the repo should be migrated.
+        """
+        project_conf = self._project_mappings.get(project_key, {})
+        include = project_conf.get("include_repos")
+        exclude = project_conf.get("exclude_repos", [])
+
+        if include is not None:
+            return repo_slug in include
+        return repo_slug not in exclude
+
     @staticmethod
     def _validate(raw):
         for section in ("bitbucket", "github"):

@@ -77,6 +77,14 @@ def migrate_repos(config):
             repo_slug = repo["slug"]
             repo_name = repo.get("name", repo_slug)
 
+            if not config.should_migrate_repo(project_key, repo_slug):
+                logger.info(
+                    "Skipping %s/%s (filtered out by include/exclude_repos)",
+                    project_key, repo_slug,
+                )
+                total_skipped += 1
+                continue
+
             if state.is_migrated(project_key, repo_slug):
                 logger.info("Skipping already migrated: %s/%s", project_key, repo_slug)
                 total_skipped += 1

@@ -148,6 +148,93 @@ class TestResolveTarget:
         assert name == "MyProject-api"
 
 
+class TestShouldMigrateRepo:
+    def test_no_filters_migrates_everything(self, tmp_path, base_config):
+        """Without include/exclude, all repos migrate."""
+        path = _write_config(tmp_path, base_config)
+        config = Config(path)
+
+        assert config.should_migrate_repo("PROJ", "any-repo") is True
+        assert config.should_migrate_repo("OTHER", "other-repo") is True
+
+    def test_include_repos_acts_as_allowlist(self, tmp_path, base_config):
+        """include_repos limits migration to listed repos only."""
+        base_config["repo_mapping"] = {
+            "projects": {
+                "INFRA": {
+                    "include_repos": ["my-service", "my-api"],
+                },
+            }
+        }
+        path = _write_config(tmp_path, base_config)
+        config = Config(path)
+
+        assert config.should_migrate_repo("INFRA", "my-service") is True
+        assert config.should_migrate_repo("INFRA", "my-api") is True
+        assert config.should_migrate_repo("INFRA", "other-repo") is False
+
+    def test_exclude_repos_acts_as_denylist(self, tmp_path, base_config):
+        """exclude_repos skips listed repos, migrates the rest."""
+        base_config["repo_mapping"] = {
+            "projects": {
+                "PLATFORM": {
+                    "exclude_repos": ["deprecated-tool", "archived-spike"],
+                },
+            }
+        }
+        path = _write_config(tmp_path, base_config)
+        config = Config(path)
+
+        assert config.should_migrate_repo("PLATFORM", "api-gateway") is True
+        assert config.should_migrate_repo("PLATFORM", "deprecated-tool") is False
+        assert config.should_migrate_repo("PLATFORM", "archived-spike") is False
+
+    def test_include_takes_precedence_over_exclude(self, tmp_path, base_config):
+        """When both are set, include_repos wins (exclude is ignored)."""
+        base_config["repo_mapping"] = {
+            "projects": {
+                "INFRA": {
+                    "include_repos": ["my-service"],
+                    "exclude_repos": ["my-service"],  # should be ignored
+                },
+            }
+        }
+        path = _write_config(tmp_path, base_config)
+        config = Config(path)
+
+        # include wins
+        assert config.should_migrate_repo("INFRA", "my-service") is True
+        assert config.should_migrate_repo("INFRA", "other") is False
+
+    def test_empty_include_skips_everything(self, tmp_path, base_config):
+        """An empty include_repos list means migrate nothing from that project."""
+        base_config["repo_mapping"] = {
+            "projects": {
+                "INFRA": {"include_repos": []},
+            }
+        }
+        path = _write_config(tmp_path, base_config)
+        config = Config(path)
+
+        assert config.should_migrate_repo("INFRA", "any-repo") is False
+
+    def test_filters_scoped_to_project(self, tmp_path, base_config):
+        """Filters on one project don't affect other projects."""
+        base_config["repo_mapping"] = {
+            "projects": {
+                "INFRA": {"include_repos": ["my-service"]},
+            }
+        }
+        path = _write_config(tmp_path, base_config)
+        config = Config(path)
+
+        # INFRA is filtered
+        assert config.should_migrate_repo("INFRA", "my-service") is True
+        assert config.should_migrate_repo("INFRA", "other") is False
+        # OTHER project has no filter, migrates everything
+        assert config.should_migrate_repo("OTHER", "anything") is True
+
+
 class TestConfigValidation:
     def test_missing_bitbucket_section(self, tmp_path):
         data = {"github": {"base_url": "x", "org": "y"}}

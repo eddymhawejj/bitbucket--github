@@ -152,6 +152,33 @@ repo_mapping:
 
 If you omit `repo_mapping` entirely, all repos go to `github.org` with their original Bitbucket slug as the name.
 
+#### Migrate only a subset of repos from a project
+
+If you only want specific repos from a project, use `include_repos` (allowlist) or `exclude_repos` (denylist):
+
+```yaml
+repo_mapping:
+  projects:
+    INFRA:
+      github_org: "infra-team"
+      # Only these repos from INFRA are migrated; everything else is skipped
+      include_repos:
+        - my-service
+        - my-api
+    PLATFORM:
+      github_org: "platform-eng"
+      # Migrate all repos EXCEPT these
+      exclude_repos:
+        - deprecated-tool
+        - archived-spike
+```
+
+**Resolution:**
+- If `include_repos` is set, only those repos migrate (acts as an allowlist).
+- Otherwise, `exclude_repos` skips the listed repos.
+- If both are set, `include_repos` wins and `exclude_repos` is ignored.
+- Projects with no filter migrate all repos (the default).
+
 ### Step 6: Configure user mapping (optional)
 
 Map Bitbucket usernames to GitHub usernames for PR reviewer assignments and author attribution:
@@ -340,6 +367,8 @@ This makes every operation idempotent — re-running any command skips already-c
 | `repo_mapping.name_template` | No | `{slug}` | Template for GitHub repo names |
 | `repo_mapping.projects.<KEY>.github_org` | No | `github.org` | Override target org per project |
 | `repo_mapping.projects.<KEY>.name_template` | No | global template | Override naming per project |
+| `repo_mapping.projects.<KEY>.include_repos` | No | — | Allowlist: only listed repos migrate |
+| `repo_mapping.projects.<KEY>.exclude_repos` | No | `[]` | Denylist: listed repos are skipped |
 | `repo_mapping.projects.<KEY>.repos.<slug>.github_name` | No | template | Explicit repo name override |
 | `user_mapping` | No | `{}` | Bitbucket → GitHub username map |
 
