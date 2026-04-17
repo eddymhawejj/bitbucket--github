@@ -16,6 +16,7 @@ def mock_config():
     config.gh_base_url = "https://gatehousesatcom.ghe.com/api/v3"
     config.bb_projects = ["SYS_YAHSAT_NGSP", "DCKR", "NGRM"]
     config.bb_verify_ssl = True
+    config.gh_ssh_host = "gatehousesatcom.ghe.com"
     config.should_migrate_repo = MagicMock(return_value=True)
     config.resolve_target = MagicMock(
         side_effect=lambda proj, slug: ("networks-ngsp", slug)
@@ -40,17 +41,17 @@ SAMPLE_GITMODULES_HTTP = """\
 
 
 class TestRemapSubmoduleUrls:
-    def test_remaps_ssh_urls(self, mock_config):
+    def test_remaps_ssh_urls_to_ssh(self, mock_config):
         result = remap_submodule_urls(SAMPLE_GITMODULES_SSH, mock_config)
 
-        assert "gatehousesatcom.ghe.com/networks-ngsp/cai_lib.git" in result
-        assert "gatehousesatcom.ghe.com/networks-ngsp/cai_def.git" in result
+        assert "git@gatehousesatcom.ghe.com:networks-ngsp/cai_lib.git" in result
+        assert "git@gatehousesatcom.ghe.com:networks-ngsp/cai_def.git" in result
         assert "cph1-eud-rep001" not in result
 
-    def test_remaps_http_urls(self, mock_config):
+    def test_remaps_http_urls_to_https(self, mock_config):
         result = remap_submodule_urls(SAMPLE_GITMODULES_HTTP, mock_config)
 
-        assert "gatehousesatcom.ghe.com/networks-ngsp/cai_lib.git" in result
+        assert "https://gatehousesatcom.ghe.com/networks-ngsp/cai_lib.git" in result
         assert "cph1-eud-rep001" not in result
 
     def test_preserves_non_url_lines(self, mock_config):
@@ -86,7 +87,7 @@ class TestRemapSubmoduleUrls:
 
         result = remap_submodule_urls(content, mock_config)
 
-        assert "gatehousesatcom.ghe.com/networks-ngsp/included.git" in result
+        assert "git@gatehousesatcom.ghe.com:networks-ngsp/included.git" in result
         assert "cph1-eud-rep001:7999/sys_yahsat_ngsp/excluded-repo.git" in result
 
     def test_handles_uppercase_project_in_url(self, mock_config):
@@ -98,7 +99,7 @@ class TestRemapSubmoduleUrls:
 
         result = remap_submodule_urls(content, mock_config)
 
-        assert "gatehousesatcom.ghe.com/networks-ngsp/cai_lib.git" in result
+        assert "git@gatehousesatcom.ghe.com:networks-ngsp/cai_lib.git" in result
 
     def test_no_changes_returns_same_content(self, mock_config):
         content = (
@@ -126,8 +127,9 @@ class TestRemapSubmoduleUrls:
 
         result = remap_submodule_urls(content, mock_config)
 
-        assert "gatehousesatcom.ghe.com/networks-ngsp/repo_a.git" in result
-        assert "gatehousesatcom.ghe.com/networks-ngsp/repo_b.git" in result
+        # SSH stays SSH, HTTP stays HTTPS
+        assert "git@gatehousesatcom.ghe.com:networks-ngsp/repo_a.git" in result
+        assert "https://gatehousesatcom.ghe.com/networks-ngsp/repo_b.git" in result
         assert "cph1-eud-rep001" not in result
 
     def test_all_projects_when_bb_projects_is_none(self, mock_config):
@@ -141,7 +143,7 @@ class TestRemapSubmoduleUrls:
 
         result = remap_submodule_urls(content, mock_config)
 
-        assert "gatehousesatcom.ghe.com/networks-ngsp/some_repo.git" in result
+        assert "git@gatehousesatcom.ghe.com:networks-ngsp/some_repo.git" in result
 
     def test_uses_correct_org_per_project(self, mock_config):
         """Different projects should resolve to different GitHub orgs."""
@@ -162,5 +164,18 @@ class TestRemapSubmoduleUrls:
 
         result = remap_submodule_urls(content, mock_config)
 
-        assert "gatehousesatcom.ghe.com/networks-ngsp/repo_a.git" in result
-        assert "gatehousesatcom.ghe.com/networks-docker/repo_b.git" in result
+        assert "git@gatehousesatcom.ghe.com:networks-ngsp/repo_a.git" in result
+        assert "git@gatehousesatcom.ghe.com:networks-docker/repo_b.git" in result
+
+    def test_falls_back_to_https_when_no_ssh_host(self, mock_config):
+        """Without gh_ssh_host, SSH URLs fall back to HTTPS."""
+        mock_config.gh_ssh_host = ""
+        content = (
+            "[submodule \"a\"]\n"
+            "\tpath = a\n"
+            "\turl = ssh://git@cph1-eud-rep001:7999/sys_yahsat_ngsp/repo_a.git\n"
+        )
+
+        result = remap_submodule_urls(content, mock_config)
+
+        assert "https://gatehousesatcom.ghe.com/networks-ngsp/repo_a.git" in result

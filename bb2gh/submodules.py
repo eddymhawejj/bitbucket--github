@@ -44,25 +44,39 @@ def remap_submodule_urls(content, config):
     """
     bb_ssh = config.bb_ssh_url.rstrip("/")
     bb_http = config.bb_base_url.rstrip("/")
-    gh_base = config.gh_base_url.replace("/api/v3", "").rstrip("/")
+    gh_ssh_host = config.gh_ssh_host
+    gh_https_base = config.gh_base_url.replace("/api/v3", "").rstrip("/")
 
-    def _replace(match):
-        project_key_raw = match.group(1)
-        slug = match.group(2)
+    def _resolve(project_key_raw, slug):
         for pk in [project_key_raw.upper(), project_key_raw]:
             if config.bb_projects and pk not in config.bb_projects:
                 continue
             if not config.should_migrate_repo(pk, slug):
                 continue
-            gh_org, gh_repo = config.resolve_target(pk, slug)
-            return f"{gh_base}/{gh_org}/{gh_repo}.git"
-        return match.group(0)
+            return config.resolve_target(pk, slug)
+        return None
+
+    def _replace_ssh(match):
+        result = _resolve(match.group(1), match.group(2))
+        if not result:
+            return match.group(0)
+        gh_org, gh_repo = result
+        if gh_ssh_host:
+            return f"git@{gh_ssh_host}:{gh_org}/{gh_repo}.git"
+        return f"{gh_https_base}/{gh_org}/{gh_repo}.git"
+
+    def _replace_http(match):
+        result = _resolve(match.group(1), match.group(2))
+        if not result:
+            return match.group(0)
+        gh_org, gh_repo = result
+        return f"{gh_https_base}/{gh_org}/{gh_repo}.git"
 
     ssh_pat = re.escape(bb_ssh) + r"/([^/]+)/([^/]+?)\.git"
-    content = re.sub(ssh_pat, _replace, content)
+    content = re.sub(ssh_pat, _replace_ssh, content)
 
     http_pat = re.escape(bb_http) + r"/scm/([^/]+)/([^/]+?)\.git"
-    content = re.sub(http_pat, _replace, content)
+    content = re.sub(http_pat, _replace_http, content)
 
     return content
 
