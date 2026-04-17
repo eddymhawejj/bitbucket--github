@@ -96,6 +96,12 @@ class GithubClient:
                 "Failed to add reviewers to PR #%d: %s", pr_number, e
             )
 
+    def set_default_branch(self, repo_name, branch, org_name=None):
+        """Set the default branch for a repository."""
+        repo = self.get_repo(repo_name, org_name)
+        repo.edit(default_branch=branch)
+        logger.info("Set default branch for %s to %s", repo_name, branch)
+
     def get_clone_url(self, repo_name, org_name=None):
         """Get the HTTPS clone URL for a repo, with token embedded for auth."""
         repo = self.get_repo(repo_name, org_name)

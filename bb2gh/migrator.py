@@ -154,6 +154,14 @@ def _migrate_single_repo(config, bb, gh, state, project_key, repo_slug, repo_nam
     _run_git(["remote", "add", "github", gh_clone_url], cwd=bare_path)
     _run_git(["push", "--mirror", "github"], cwd=bare_path)
 
-    # 6. Record in state (includes the resolved GitHub org and repo name)
+    # 6. Set default branch on GitHub to match Bitbucket's HEAD
+    try:
+        head_ref = _run_git(["symbolic-ref", "HEAD"], cwd=bare_path)
+        default_branch = head_ref.replace("refs/heads/", "")
+        gh.set_default_branch(gh_repo_name, default_branch, org_name=gh_org)
+    except Exception:
+        logger.warning("Could not set default branch for %s/%s", gh_org, gh_repo_name)
+
+    # 7. Record in state (includes the resolved GitHub org and repo name)
     state.mark_migrated(project_key, repo_slug, gh_org=gh_org, gh_repo_name=gh_repo_name)
     logger.info("Successfully migrated %s/%s -> %s/%s", project_key, repo_slug, gh_org, gh_repo_name)
