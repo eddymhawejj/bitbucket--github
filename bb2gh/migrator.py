@@ -18,7 +18,7 @@ def _redact(text):
     return re.sub(r"(https?://)[^@/]+@", r"\1***@", text)
 
 
-def _run_git(args, cwd=None):
+def _run_git(args, cwd=None, quiet=False):
     """Run a git command and return stdout."""
     cmd = ["git"] + args
     logger.debug("Running: %s", " ".join(cmd))
@@ -26,7 +26,8 @@ def _run_git(args, cwd=None):
         cmd, cwd=cwd, capture_output=True, text=True, check=False
     )
     if result.returncode != 0:
-        logger.error("git %s failed: %s", args[0], _redact(result.stderr.strip()))
+        if not quiet:
+            logger.error("git %s failed: %s", args[0], _redact(result.stderr.strip()))
         raise subprocess.CalledProcessError(
             result.returncode, cmd, result.stdout, result.stderr
         )
@@ -77,9 +78,9 @@ def _migrate_lfs(bare_path, threshold):
                 continue
             local_name = branch.replace("origin/", "", 1)
             try:
-                _run_git(["branch", "--track", local_name, branch], cwd=work_path)
+                _run_git(["branch", "--track", local_name, branch], cwd=work_path, quiet=True)
             except subprocess.CalledProcessError:
-                pass  # Already exists (e.g. the default branch)
+                pass  # Already exists (default branch)
 
         _run_git(["lfs", "install"], cwd=work_path)
         _run_git(
@@ -214,7 +215,7 @@ def _migrate_single_repo(config, bb, gh, state, project_key, repo_slug, repo_nam
 
     # Remove existing github remote if present, then add
     try:
-        _run_git(["remote", "remove", "github"], cwd=bare_path)
+        _run_git(["remote", "remove", "github"], cwd=bare_path, quiet=True)
     except subprocess.CalledProcessError:
         pass  # Remote didn't exist
 
