@@ -14,6 +14,9 @@ class BitbucketClient:
         self.api_url = f"{self.base_url}/rest/api/1.0"
         self.session = requests.Session()
         self.session.verify = verify_ssl
+        if not verify_ssl:
+            import urllib3
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
         if token:
             self.session.headers["Authorization"] = f"Bearer {token}"
 

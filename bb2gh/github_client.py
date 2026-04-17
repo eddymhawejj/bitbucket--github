@@ -15,6 +15,7 @@ class GithubClient:
 
     def __init__(self, base_url, token, default_org):
         self.gh = Github(base_url=base_url, login_or_token=token)
+        self._token = token
         self.default_org = default_org
         self._org_cache = {}
 
@@ -96,6 +97,9 @@ class GithubClient:
             )
 
     def get_clone_url(self, repo_name, org_name=None):
-        """Get the HTTPS clone URL for a repo."""
+        """Get the HTTPS clone URL for a repo, with token embedded for auth."""
         repo = self.get_repo(repo_name, org_name)
-        return repo.clone_url
+        url = repo.clone_url
+        # Embed token so git push doesn't prompt for credentials
+        url = url.replace("https://", f"https://x-access-token:{self._token}@", 1)
+        return url
