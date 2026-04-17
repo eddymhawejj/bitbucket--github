@@ -210,7 +210,9 @@ def _migrate_single_repo(config, bb, gh, state, project_key, repo_slug, repo_nam
     if os.path.exists(bare_path):
         # Already cloned, fetch latest
         logger.info("Bare clone exists, fetching latest: %s", bare_path)
-        _run_git(["fetch", "origin", "--prune"], cwd=bare_path)
+        _run_git(["fetch", "origin", "--prune",
+                  "+refs/heads/*:refs/heads/*",
+                  "+refs/tags/*:refs/tags/*"], cwd=bare_path)
     else:
         clone_url = bb.get_repo_clone_url(repo, protocol="ssh")
         if not clone_url:

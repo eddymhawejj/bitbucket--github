@@ -38,7 +38,9 @@ class TestSyncer:
         syncer._sync_all()
 
         # Should fetch from origin and push to github
-        mock_git.assert_any_call(["fetch", "origin", "--prune"], cwd=str(bare_path))
+        mock_git.assert_any_call(["fetch", "origin", "--prune",
+                                  "+refs/heads/*:refs/heads/*",
+                                  "+refs/tags/*:refs/tags/*"], cwd=str(bare_path))
         mock_git.assert_any_call(["push", "github", "--mirror"], cwd=str(bare_path))
         state_instance.update_sync_time.assert_called_once_with("PROJ", "my-repo")
 

@@ -119,7 +119,9 @@ class Syncer:
         start = time.time()
 
         # Fetch from Bitbucket (origin)
-        _run_git(["fetch", "origin", "--prune"], cwd=bare_path)
+        _run_git(["fetch", "origin", "--prune",
+                  "+refs/heads/*:refs/heads/*",
+                  "+refs/tags/*:refs/tags/*"], cwd=bare_path)
 
         # Clean hidden refs before pushing
         _clean_hidden_refs(bare_path)
