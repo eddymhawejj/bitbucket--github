@@ -14,6 +14,8 @@ def mock_config(tmp_path):
     config = MagicMock(spec=Config)
     config.work_dir = str(tmp_path)
     config.sync_interval = 1
+    config.lfs_enabled = False
+    config.lfs_threshold = "100mb"
     return config
 
 

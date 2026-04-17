@@ -47,6 +47,26 @@ def _clean_hidden_refs(bare_repo_path):
                 logger.warning("Failed to delete ref: %s", ref)
 
 
+def _migrate_lfs(bare_path, threshold):
+    """Convert files above threshold to Git LFS in all branches.
+
+    git lfs migrate import requires a non-bare repo, so we temporarily
+    flip core.bare, run the migration, then flip it back.
+    """
+    logger.info("Running LFS migration (threshold: %s) in %s", threshold, bare_path)
+    _run_git(["lfs", "install", "--local"], cwd=bare_path)
+    _run_git(["config", "core.bare", "false"], cwd=bare_path)
+    try:
+        _run_git(
+            ["lfs", "migrate", "import", "--everything",
+             f"--above={threshold}", "--yes"],
+            cwd=bare_path,
+        )
+    finally:
+        _run_git(["config", "core.bare", "true"], cwd=bare_path)
+    logger.info("LFS migration complete for %s", bare_path)
+
+
 def migrate_repos(config):
     """Run the full bulk migration.
 
@@ -142,7 +162,11 @@ def _migrate_single_repo(config, bb, gh, state, project_key, repo_slug, repo_nam
     # 4. Remap submodule URLs from Bitbucket to GitHub
     remap_submodules_in_bare_repo(bare_path, config)
 
-    # 5. Add GitHub remote and push
+    # 5. Migrate large files to LFS if enabled
+    if config.lfs_enabled:
+        _migrate_lfs(bare_path, config.lfs_threshold)
+
+    # 6. Add GitHub remote and push
     gh_clone_url = gh.get_clone_url(gh_repo_name, org_name=gh_org)
 
     # Remove existing github remote if present, then add
@@ -154,7 +178,14 @@ def _migrate_single_repo(config, bb, gh, state, project_key, repo_slug, repo_nam
     _run_git(["remote", "add", "github", gh_clone_url], cwd=bare_path)
     _run_git(["push", "--mirror", "github"], cwd=bare_path)
 
-    # 6. Set default branch on GitHub to match Bitbucket's HEAD
+    # Push LFS objects separately (mirror push only sends git objects)
+    if config.lfs_enabled:
+        try:
+            _run_git(["lfs", "push", "--all", "github"], cwd=bare_path)
+        except subprocess.CalledProcessError:
+            logger.warning("LFS push failed for %s/%s (LFS may not be enabled on GitHub)", gh_org, gh_repo_name)
+
+    # 7. Set default branch on GitHub to match Bitbucket's HEAD
     try:
         head_ref = _run_git(["symbolic-ref", "HEAD"], cwd=bare_path)
         default_branch = head_ref.replace("refs/heads/", "")

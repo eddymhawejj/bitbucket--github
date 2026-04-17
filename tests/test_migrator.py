@@ -29,6 +29,8 @@ def mock_config(tmp_path):
     config.resolve_target = MagicMock(side_effect=lambda proj, slug: ("my-org", slug))
     # Default: no filtering — all repos migrate
     config.should_migrate_repo = MagicMock(return_value=True)
+    config.lfs_enabled = False
+    config.lfs_threshold = "100mb"
     return config
 
 

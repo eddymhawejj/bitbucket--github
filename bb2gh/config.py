@@ -37,6 +37,11 @@ class Config:
         # User mapping (Bitbucket username -> GitHub username)
         self.user_mapping = raw.get("user_mapping", {})
 
+        # LFS settings
+        lfs = raw.get("lfs", {})
+        self.lfs_enabled = lfs.get("enabled", False)
+        self.lfs_threshold = lfs.get("threshold", "100mb")
+
         # Repository mapping (Bitbucket project/repo -> GitHub org/repo)
         rm = raw.get("repo_mapping", {})
         self._repo_mapping = rm

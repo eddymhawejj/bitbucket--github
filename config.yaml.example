@@ -63,6 +63,13 @@ repo_mapping:
       #   - archived-spike
     # Projects not listed here use github.org and the global name_template
 
+# Optional: auto-convert large files to Git LFS before pushing to GitHub.
+# GitHub rejects files >100MB. This rewrites history to store them as LFS objects.
+lfs:
+  enabled: false
+  # Files above this size are converted to LFS pointers
+  threshold: "100mb"
+
 # Optional: map Bitbucket usernames to GitHub usernames
 # Used for PR author attribution and reviewer assignments
 # user_mapping:
