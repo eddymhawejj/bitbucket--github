@@ -97,11 +97,19 @@ def _migrate_lfs(bare_path, threshold):
                 pass  # Already exists (default branch)
 
         _run_git(["lfs", "install"], cwd=work_path)
-        _run_git(
-            ["lfs", "migrate", "import", "--everything",
-             f"--above={threshold}", "--yes"],
-            cwd=work_path,
-        )
+        try:
+            _run_git(
+                ["lfs", "migrate", "import", "--everything",
+                 f"--above={threshold}", "--yes"],
+                cwd=work_path,
+            )
+        except subprocess.CalledProcessError as e:
+            # LFS migrate may fail on post-rewrite checkout (unborn branch, etc.)
+            # but the rewrite itself completed. Check stderr for this case.
+            if "Could not checkout" in (e.stderr or "") and "Rewriting commits" in (e.stderr or ""):
+                logger.warning("LFS rewrite completed but checkout failed (harmless)")
+            else:
+                raise
 
         # Fetch rewritten branches and tags back into the bare repo
         _run_git(["remote", "add", "lfs-source", work_path], cwd=bare_path)
