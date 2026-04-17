@@ -79,6 +79,61 @@ def migrate_prs(ctx, dry_run):
         sys.exit(1)
 
 
+@cli.command("reset")
+@click.option("--project", multiple=True, help="Reset all repos in this project (can repeat).")
+@click.option("--repo", multiple=True, help="Reset a specific PROJECT/SLUG (can repeat).")
+@click.option("--all", "reset_all", is_flag=True, help="Reset ALL migrated repos.")
+@click.option("--dry-run", is_flag=True, help="Show what would be reset without changing state.")
+@click.pass_context
+def reset(ctx, project, repo, reset_all, dry_run):
+    """Reset repos in state.json so they get re-migrated.
+
+    Examples:
+      bb2gh reset --project UPSTREAM
+      bb2gh reset --repo UPSTREAM/embeddedsw --repo UPSTREAM/git
+      bb2gh reset --all
+    """
+    config = ctx.obj["config"]
+    from .state import State
+    state = State(config.work_dir)
+
+    repos = state.get_migrated_repos()
+    if not repos:
+        click.echo("No migrated repos found.")
+        return
+
+    projects_set = set(p.upper() for p in project)
+    repos_set = set(repo)
+
+    reset_count = 0
+    for project_key, repo_slug in repos:
+        should_reset = False
+        if reset_all:
+            should_reset = True
+        elif project_key in projects_set or project_key.upper() in projects_set:
+            should_reset = True
+        elif f"{project_key}/{repo_slug}" in repos_set:
+            should_reset = True
+
+        if not should_reset:
+            continue
+
+        if dry_run:
+            gh_org, gh_repo = state.get_github_target(project_key, repo_slug)
+            click.echo(f"[DRY RUN] Would reset: {project_key}/{repo_slug} (was -> {gh_org}/{gh_repo})")
+        else:
+            state.reset_repo(project_key, repo_slug)
+            click.echo(f"Reset: {project_key}/{repo_slug}")
+        reset_count += 1
+
+    if reset_count == 0:
+        click.echo("No matching repos found in state.")
+    else:
+        click.echo(f"\n{'Would reset' if dry_run else 'Reset'} {reset_count} repos.")
+        if not dry_run:
+            click.echo("Run 'bb2gh migrate' to re-migrate them.")
+
+
 @cli.command("reset-submodules")
 @click.option("--dry-run", is_flag=True, help="Show what would be reset without changing state.")
 @click.pass_context
