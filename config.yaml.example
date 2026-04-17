@@ -5,6 +5,8 @@ bitbucket:
   token: "YOUR_BITBUCKET_TOKEN"
   # SSH base URL for git clone operations
   ssh_url: "ssh://git@bitbucket.mycompany.com:7999"
+  # Set to false if Bitbucket uses a self-signed or internal CA certificate
+  verify_ssl: true
   # Optional: limit migration to specific projects (omit to migrate all)
   # projects:
   #   - PROJ1

@@ -19,6 +19,7 @@ def mock_config(tmp_path):
     config.bb_token = "fake-bb-token"
     config.bb_ssh_url = "ssh://git@bitbucket.example.com:7999"
     config.bb_projects = ["PROJ1"]
+    config.bb_verify_ssl = True
     config.gh_base_url = "https://github.example.com/api/v3"
     config.gh_token = "fake-gh-token"
     config.gh_org = "my-org"

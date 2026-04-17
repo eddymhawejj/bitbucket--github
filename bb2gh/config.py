@@ -20,6 +20,7 @@ class Config:
         self.bb_token = bb.get("token") or os.environ.get("BB_TOKEN", "")
         self.bb_ssh_url = bb["ssh_url"].rstrip("/")
         self.bb_projects = bb.get("projects")  # None means all projects
+        self.bb_verify_ssl = bb.get("verify_ssl", True)
 
         # GitHub settings
         gh = raw["github"]

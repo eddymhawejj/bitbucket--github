@@ -18,6 +18,7 @@ def mock_config():
     config = MagicMock(spec=Config)
     config.bb_base_url = "https://bitbucket.example.com"
     config.bb_token = "fake-token"
+    config.bb_verify_ssl = True
     config.gh_base_url = "https://github.example.com/api/v3"
     config.gh_token = "fake-gh-token"
     config.gh_org = "my-org"

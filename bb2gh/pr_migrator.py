@@ -66,7 +66,7 @@ def migrate_pull_requests(config, dry_run=False):
         config: Config object.
         dry_run: If True, log what would be done without making changes.
     """
-    bb = BitbucketClient(config.bb_base_url, config.bb_token)
+    bb = BitbucketClient(config.bb_base_url, config.bb_token, verify_ssl=config.bb_verify_ssl)
     gh = GithubClient(config.gh_base_url, config.gh_token, config.gh_org)
     state = State(config.work_dir)
 

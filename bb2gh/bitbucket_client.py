@@ -9,10 +9,11 @@ logger = logging.getLogger(__name__)
 class BitbucketClient:
     """Client for Bitbucket Server (Data Center) REST API v1.0."""
 
-    def __init__(self, base_url, token):
+    def __init__(self, base_url, token, verify_ssl=True):
         self.base_url = base_url.rstrip("/")
         self.api_url = f"{self.base_url}/rest/api/1.0"
         self.session = requests.Session()
+        self.session.verify = verify_ssl
         if token:
             self.session.headers["Authorization"] = f"Bearer {token}"
 
