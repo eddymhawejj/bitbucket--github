@@ -5,6 +5,12 @@ bitbucket:
   token: "YOUR_BITBUCKET_TOKEN"
   # SSH base URL for git clone operations
   ssh_url: "ssh://git@bitbucket.mycompany.com:7999"
+  # Additional Bitbucket SSH hostnames (for submodule URL matching).
+  # Some .gitmodules may use a different hostname variant (e.g. with FQDN).
+  # The hostname from ssh_url is matched automatically — list extras here.
+  # ssh_hostnames:
+  #   - "bitbucket.mycompany.com"
+  #   - "bitbucket.internal.mycompany.com"
   # Set to false if Bitbucket uses a self-signed or internal CA certificate
   verify_ssl: true
   # Optional: limit migration to specific projects (omit to migrate all)

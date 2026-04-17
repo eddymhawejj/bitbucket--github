@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import subprocess
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -36,49 +37,123 @@ def _git(args, cwd, stdin_data=None, env_extra=None):
     return result.stdout.strip()
 
 
+def _build_bb_hostnames(config):
+    """Extract all known Bitbucket hostnames from config."""
+    hostnames = set(config.bb_ssh_hostnames)
+
+    # Extract hostname from ssh_url: ssh://git@host:port -> host
+    parsed = urlparse(config.bb_ssh_url)
+    if parsed.hostname:
+        hostnames.add(parsed.hostname)
+
+    # Extract hostname from base_url: https://host -> host
+    parsed = urlparse(config.bb_base_url)
+    if parsed.hostname:
+        hostnames.add(parsed.hostname)
+
+    return hostnames
+
+
+def _extract_submodule_urls(content):
+    """Extract all url = ... values from .gitmodules content."""
+    return re.findall(r"url\s*=\s*(.+)", content)
+
+
+def _parse_bb_url(url, bb_hostnames):
+    """Parse a URL and check if it's a Bitbucket URL.
+
+    Returns (project_key, slug) if it's a BB URL, None otherwise.
+    Handles:
+      - ssh://git@host:port/project/repo.git
+      - git@host:port/project/repo.git  (shouldn't exist for BB but just in case)
+      - https://host/scm/project/repo.git
+    """
+    # SSH format: ssh://git@hostname:port/project/repo.git
+    m = re.match(r"ssh://[^@]+@([^:/]+)[:/]\d*/([^/]+)/([^/]+?)\.git$", url)
+    if m and m.group(1) in bb_hostnames:
+        return m.group(2), m.group(3)
+
+    # HTTP format: https://hostname/scm/project/repo.git
+    m = re.match(r"https?://([^/]+)/scm/([^/]+)/([^/]+?)\.git$", url)
+    if m and m.group(1) in bb_hostnames:
+        return m.group(2), m.group(3)
+
+    return None
+
+
+def _is_already_github(url, gh_ssh_host, gh_https_base):
+    """Check if a URL already points to GitHub."""
+    if gh_ssh_host and url.startswith(f"git@{gh_ssh_host}:"):
+        return True
+    if gh_https_base and gh_https_base in url:
+        return True
+    return False
+
+
 def remap_submodule_urls(content, config):
     """Replace Bitbucket submodule URLs in .gitmodules with GitHub URLs.
 
-    Only remaps URLs for repos that are in the migration scope
-    (matching project list and include/exclude filters).
+    If any Bitbucket URL cannot be resolved (project not migrated, repo
+    excluded), the entire .gitmodules is left unchanged to avoid a mix
+    of old and new URLs.
     """
-    bb_ssh = config.bb_ssh_url.rstrip("/")
-    bb_http = config.bb_base_url.rstrip("/")
+    bb_hostnames = _build_bb_hostnames(config)
     gh_ssh_host = config.gh_ssh_host
     gh_https_base = config.gh_base_url.replace("/api/v3", "").rstrip("/")
 
-    def _resolve(project_key_raw, slug):
+    urls = _extract_submodule_urls(content)
+    if not urls:
+        return content
+
+    # First pass: check ALL URLs can be resolved
+    replacements = {}
+    for url in urls:
+        url = url.strip()
+
+        # Already points to GitHub — skip
+        if _is_already_github(url, gh_ssh_host, gh_https_base):
+            continue
+
+        parsed = _parse_bb_url(url, bb_hostnames)
+        if parsed is None:
+            # Not a Bitbucket URL we recognize — skip (external dependency)
+            continue
+
+        project_key_raw, slug = parsed
+        resolved = None
         for pk in [project_key_raw.upper(), project_key_raw]:
             if config.bb_projects and pk not in config.bb_projects:
                 continue
             if not config.should_migrate_repo(pk, slug):
                 continue
-            return config.resolve_target(pk, slug)
-        return None
+            resolved = config.resolve_target(pk, slug)
+            break
 
-    def _replace_ssh(match):
-        result = _resolve(match.group(1), match.group(2))
-        if not result:
-            return match.group(0)
-        gh_org, gh_repo = result
-        if gh_ssh_host:
-            return f"git@{gh_ssh_host}:{gh_org}/{gh_repo}.git"
-        return f"{gh_https_base}/{gh_org}/{gh_repo}.git"
+        if not resolved:
+            logger.warning(
+                "Cannot remap submodule URL %s — project %s/%s not in migration scope. "
+                "Skipping .gitmodules rewrite entirely.",
+                url, project_key_raw, slug,
+            )
+            return content  # Return unchanged
 
-    def _replace_http(match):
-        result = _resolve(match.group(1), match.group(2))
-        if not result:
-            return match.group(0)
-        gh_org, gh_repo = result
-        return f"{gh_https_base}/{gh_org}/{gh_repo}.git"
+        gh_org, gh_repo = resolved
+        is_ssh = url.startswith("ssh://")
+        if is_ssh and gh_ssh_host:
+            new_url = f"git@{gh_ssh_host}:{gh_org}/{gh_repo}.git"
+        else:
+            new_url = f"{gh_https_base}/{gh_org}/{gh_repo}.git"
+        replacements[url] = new_url
 
-    ssh_pat = re.escape(bb_ssh) + r"/([^/]+)/([^/]+?)\.git"
-    content = re.sub(ssh_pat, _replace_ssh, content)
+    if not replacements:
+        return content
 
-    http_pat = re.escape(bb_http) + r"/scm/([^/]+)/([^/]+?)\.git"
-    content = re.sub(http_pat, _replace_http, content)
+    # Second pass: apply all replacements
+    new_content = content
+    for old_url, new_url in replacements.items():
+        new_content = new_content.replace(old_url, new_url)
 
-    return content
+    return new_content
 
 
 def remap_submodules_in_bare_repo(bare_repo_path, config):
