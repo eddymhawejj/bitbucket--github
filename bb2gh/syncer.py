@@ -128,14 +128,15 @@ class Syncer:
         remap_submodules_in_bare_repo(bare_path, self.config)
 
         # Migrate large files to LFS if enabled
+        has_lfs = False
         if self.config.lfs_enabled:
-            _migrate_lfs(bare_path, self.config.lfs_threshold)
+            has_lfs = _migrate_lfs(bare_path, self.config.lfs_threshold)
 
         # Push to GitHub
         _run_git(["push", "github", "--mirror"], cwd=bare_path)
 
-        # Push LFS objects separately
-        if self.config.lfs_enabled:
+        # Push LFS objects — only if LFS actually converted files
+        if has_lfs:
             try:
                 _run_git(["lfs", "push", "--all", "github"], cwd=bare_path)
             except subprocess.CalledProcessError:

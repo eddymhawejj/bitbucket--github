@@ -96,17 +96,23 @@ def _migrate_lfs(bare_path, threshold):
                   "+refs/tags/*:refs/tags/*"], cwd=bare_path)
         _run_git(["remote", "remove", "lfs-source"], cwd=bare_path)
 
-        # Copy LFS objects into the bare repo
-        lfs_src = os.path.join(work_path, ".git", "lfs")
+        # Copy LFS objects into the bare repo (only if any were created)
+        lfs_src = os.path.join(work_path, ".git", "lfs", "objects")
         lfs_dst = os.path.join(bare_path, "lfs")
-        if os.path.exists(lfs_src):
+        has_lfs_objects = os.path.exists(lfs_src) and os.listdir(lfs_src)
+        if has_lfs_objects:
             if os.path.exists(lfs_dst):
                 shutil.rmtree(lfs_dst)
-            shutil.copytree(lfs_src, lfs_dst)
+            shutil.copytree(os.path.join(work_path, ".git", "lfs"), lfs_dst)
 
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
-    logger.info("LFS migration complete for %s", bare_path)
+
+    if has_lfs_objects:
+        logger.info("LFS migration converted files in %s", bare_path)
+    else:
+        logger.info("LFS migration: no files above threshold in %s", bare_path)
+    return has_lfs_objects
 
 
 def migrate_repos(config):
@@ -207,8 +213,9 @@ def _migrate_single_repo(config, bb, gh, state, project_key, repo_slug, repo_nam
     remap_submodules_in_bare_repo(bare_path, config)
 
     # 5. Migrate large files to LFS if enabled
+    has_lfs = False
     if config.lfs_enabled:
-        _migrate_lfs(bare_path, config.lfs_threshold)
+        has_lfs = _migrate_lfs(bare_path, config.lfs_threshold)
 
     # 6. Add GitHub remote and push
     gh_clone_url = gh.get_clone_url(gh_repo_name, org_name=gh_org)
@@ -222,12 +229,12 @@ def _migrate_single_repo(config, bb, gh, state, project_key, repo_slug, repo_nam
     _run_git(["remote", "add", "github", gh_clone_url], cwd=bare_path)
     _run_git(["push", "--mirror", "github"], cwd=bare_path)
 
-    # Push LFS objects separately (mirror push only sends git objects)
-    if config.lfs_enabled:
+    # Push LFS objects separately — only if LFS actually converted files
+    if has_lfs:
         try:
             _run_git(["lfs", "push", "--all", "github"], cwd=bare_path)
         except subprocess.CalledProcessError:
-            logger.warning("LFS push failed for %s/%s (LFS may not be enabled on GitHub)", gh_org, gh_repo_name)
+            logger.warning("LFS push failed for %s/%s", gh_org, gh_repo_name)
 
     # 7. Set default branch on GitHub to match Bitbucket's HEAD
     try:
