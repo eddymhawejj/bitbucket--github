@@ -86,6 +86,15 @@ class State:
         entry = self._data["repos"].get(key, {})
         return entry.get("gh_org"), entry.get("gh_repo_name")
 
+    def reset_repo(self, project_key, repo_slug):
+        """Remove a repo from state so it will be re-migrated on next run."""
+        key = f"{project_key}/{repo_slug}"
+        if key in self._data["repos"]:
+            del self._data["repos"][key]
+            self._save()
+            return True
+        return False
+
     def is_migrated(self, project_key, repo_slug):
         """Check if a repo has been migrated."""
         key = f"{project_key}/{repo_slug}"

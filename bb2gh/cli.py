@@ -79,5 +79,52 @@ def migrate_prs(ctx, dry_run):
         sys.exit(1)
 
 
+@cli.command("reset-submodules")
+@click.option("--dry-run", is_flag=True, help="Show what would be reset without changing state.")
+@click.pass_context
+def reset_submodules(ctx, dry_run):
+    """Reset migrated repos that have .gitmodules so they get re-migrated.
+
+    Scans bare clones for repos containing .gitmodules, removes them from
+    state.json, so the next 'bb2gh migrate' run re-processes them (with
+    submodule URL remapping).
+    """
+    import os
+    import subprocess
+
+    config = ctx.obj["config"]
+    from .state import State
+    state = State(config.work_dir)
+
+    repos = state.get_migrated_repos()
+    if not repos:
+        click.echo("No migrated repos found.")
+        return
+
+    reset_count = 0
+    for project_key, repo_slug in repos:
+        bare_path = os.path.join(config.work_dir, f"{project_key}__{repo_slug}.git")
+        if not os.path.exists(bare_path):
+            continue
+
+        result = subprocess.run(
+            ["git", "show", "HEAD:.gitmodules"],
+            cwd=bare_path, capture_output=True, text=True, check=False,
+        )
+        if result.returncode != 0:
+            continue
+
+        if dry_run:
+            click.echo(f"[DRY RUN] Would reset: {project_key}/{repo_slug}")
+        else:
+            state.reset_repo(project_key, repo_slug)
+            click.echo(f"Reset: {project_key}/{repo_slug}")
+        reset_count += 1
+
+    click.echo(f"\n{'Would reset' if dry_run else 'Reset'} {reset_count} repos with submodules.")
+    if not dry_run and reset_count > 0:
+        click.echo("Run 'bb2gh migrate' to re-migrate them.")
+
+
 if __name__ == "__main__":
     cli()
