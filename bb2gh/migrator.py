@@ -160,7 +160,9 @@ def _migrate_single_repo(config, bb, gh, state, project_key, repo_slug, repo_nam
     )
 
     # 1. Create repo on GitHub (in the resolved org)
+    import re
     description = repo.get("description", "") or f"Migrated from Bitbucket: {project_key}/{repo_slug}"
+    description = re.sub(r"[\x00-\x1f\x7f]", " ", description).strip()[:350]
     gh.create_repo(gh_repo_name, description=description, private=True, org_name=gh_org)
 
     # 2. Bare clone from Bitbucket
