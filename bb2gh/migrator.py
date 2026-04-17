@@ -68,7 +68,21 @@ def _migrate_lfs(bare_path, threshold):
     tmp_dir = tempfile.mkdtemp(suffix=".lfs-migrate")
     try:
         work_path = os.path.join(tmp_dir, "work")
-        _run_git(["clone", bare_path, work_path])
+        # Skip LFS smudge during clone — repo may already have LFS pointers
+        # pointing to the original BB LFS server
+        env_no_lfs = {
+            "GIT_LFS_SKIP_SMUDGE": "1",
+        }
+        cmd = ["git", "clone", bare_path, work_path]
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, check=False,
+            env={**os.environ, **env_no_lfs},
+        )
+        if result.returncode != 0:
+            logger.error("git clone failed: %s", result.stderr.strip())
+            raise subprocess.CalledProcessError(
+                result.returncode, cmd, result.stdout, result.stderr
+            )
 
         # Create local branches for ALL remote branches so LFS rewrites them all
         branches_output = _run_git(["branch", "-r"], cwd=work_path)
