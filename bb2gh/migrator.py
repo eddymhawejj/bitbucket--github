@@ -12,6 +12,12 @@ from .submodules import remap_submodules_in_bare_repo
 logger = logging.getLogger(__name__)
 
 
+def _redact(text):
+    """Remove tokens/passwords from URLs in log output."""
+    import re
+    return re.sub(r"(https?://)[^@/]+@", r"\1***@", text)
+
+
 def _run_git(args, cwd=None):
     """Run a git command and return stdout."""
     cmd = ["git"] + args
@@ -20,7 +26,7 @@ def _run_git(args, cwd=None):
         cmd, cwd=cwd, capture_output=True, text=True, check=False
     )
     if result.returncode != 0:
-        logger.error("git %s failed: %s", args[0], result.stderr.strip())
+        logger.error("git %s failed: %s", args[0], _redact(result.stderr.strip()))
         raise subprocess.CalledProcessError(
             result.returncode, cmd, result.stdout, result.stderr
         )
@@ -51,8 +57,8 @@ def _migrate_lfs(bare_path, threshold):
     """Convert files above threshold to Git LFS in all branches.
 
     git lfs migrate import requires a working tree, so we clone the
-    bare repo to a temp directory, run LFS migration there, then
-    fetch the rewritten refs back into the bare repo.
+    bare repo to a temp directory, create local branches for all remotes,
+    run LFS migration, then fetch the rewritten refs back.
     """
     import shutil
     import tempfile
@@ -60,11 +66,21 @@ def _migrate_lfs(bare_path, threshold):
     logger.info("Running LFS migration (threshold: %s) in %s", threshold, bare_path)
     tmp_dir = tempfile.mkdtemp(suffix=".lfs-migrate")
     try:
-        # Clone bare repo to a working copy
-        _run_git(["clone", bare_path, tmp_dir + "/work"])
-        work_path = tmp_dir + "/work"
+        work_path = os.path.join(tmp_dir, "work")
+        _run_git(["clone", bare_path, work_path])
 
-        # Install LFS and run migration
+        # Create local branches for ALL remote branches so LFS rewrites them all
+        branches_output = _run_git(["branch", "-r"], cwd=work_path)
+        for line in branches_output.splitlines():
+            branch = line.strip()
+            if "HEAD" in branch or not branch.startswith("origin/"):
+                continue
+            local_name = branch.replace("origin/", "", 1)
+            try:
+                _run_git(["branch", "--track", local_name, branch], cwd=work_path)
+            except subprocess.CalledProcessError:
+                pass  # Already exists (e.g. the default branch)
+
         _run_git(["lfs", "install"], cwd=work_path)
         _run_git(
             ["lfs", "migrate", "import", "--everything",
@@ -72,9 +88,11 @@ def _migrate_lfs(bare_path, threshold):
             cwd=work_path,
         )
 
-        # Fetch the rewritten refs back into the bare repo
+        # Fetch rewritten branches and tags back into the bare repo
         _run_git(["remote", "add", "lfs-source", work_path], cwd=bare_path)
-        _run_git(["fetch", "lfs-source", "--force", "+refs/heads/*:refs/heads/*"], cwd=bare_path)
+        _run_git(["fetch", "lfs-source", "--force",
+                  "+refs/heads/*:refs/heads/*",
+                  "+refs/tags/*:refs/tags/*"], cwd=bare_path)
         _run_git(["remote", "remove", "lfs-source"], cwd=bare_path)
 
         # Copy LFS objects into the bare repo
