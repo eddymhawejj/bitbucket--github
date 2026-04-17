@@ -50,20 +50,43 @@ def _clean_hidden_refs(bare_repo_path):
 def _migrate_lfs(bare_path, threshold):
     """Convert files above threshold to Git LFS in all branches.
 
-    git lfs migrate import requires a non-bare repo, so we temporarily
-    flip core.bare, run the migration, then flip it back.
+    git lfs migrate import requires a working tree, so we clone the
+    bare repo to a temp directory, run LFS migration there, then
+    fetch the rewritten refs back into the bare repo.
     """
+    import shutil
+    import tempfile
+
     logger.info("Running LFS migration (threshold: %s) in %s", threshold, bare_path)
-    _run_git(["lfs", "install", "--local"], cwd=bare_path)
-    _run_git(["config", "core.bare", "false"], cwd=bare_path)
+    tmp_dir = tempfile.mkdtemp(suffix=".lfs-migrate")
     try:
+        # Clone bare repo to a working copy
+        _run_git(["clone", bare_path, tmp_dir + "/work"])
+        work_path = tmp_dir + "/work"
+
+        # Install LFS and run migration
+        _run_git(["lfs", "install"], cwd=work_path)
         _run_git(
             ["lfs", "migrate", "import", "--everything",
              f"--above={threshold}", "--yes"],
-            cwd=bare_path,
+            cwd=work_path,
         )
+
+        # Fetch the rewritten refs back into the bare repo
+        _run_git(["remote", "add", "lfs-source", work_path], cwd=bare_path)
+        _run_git(["fetch", "lfs-source", "--force", "+refs/heads/*:refs/heads/*"], cwd=bare_path)
+        _run_git(["remote", "remove", "lfs-source"], cwd=bare_path)
+
+        # Copy LFS objects into the bare repo
+        lfs_src = os.path.join(work_path, ".git", "lfs")
+        lfs_dst = os.path.join(bare_path, "lfs")
+        if os.path.exists(lfs_src):
+            if os.path.exists(lfs_dst):
+                shutil.rmtree(lfs_dst)
+            shutil.copytree(lfs_src, lfs_dst)
+
     finally:
-        _run_git(["config", "core.bare", "true"], cwd=bare_path)
+        shutil.rmtree(tmp_dir, ignore_errors=True)
     logger.info("LFS migration complete for %s", bare_path)
 
 
