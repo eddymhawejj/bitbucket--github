@@ -7,6 +7,7 @@ import subprocess
 import time
 
 from .state import State
+from .submodules import remap_submodules_in_bare_repo
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +122,9 @@ class Syncer:
 
         # Clean hidden refs before pushing
         _clean_hidden_refs(bare_path)
+
+        # Remap submodule URLs from Bitbucket to GitHub
+        remap_submodules_in_bare_repo(bare_path, self.config)
 
         # Push to GitHub
         _run_git(["push", "github", "--mirror"], cwd=bare_path)

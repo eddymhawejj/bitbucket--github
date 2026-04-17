@@ -59,11 +59,12 @@ class TestCleanHiddenRefs:
 
 
 class TestMigrateRepos:
+    @patch("bb2gh.migrator.remap_submodules_in_bare_repo")
     @patch("bb2gh.migrator.State")
     @patch("bb2gh.migrator.GithubClient")
     @patch("bb2gh.migrator.BitbucketClient")
     @patch("bb2gh.migrator._run_git")
-    def test_migrates_new_repo(self, mock_git, MockBB, MockGH, MockState, mock_config):
+    def test_migrates_new_repo(self, mock_git, MockBB, MockGH, MockState, mock_remap, mock_config):
         # Setup mocks
         bb_instance = MockBB.return_value
         bb_instance.list_repos.return_value = [
@@ -95,11 +96,12 @@ class TestMigrateRepos:
             "PROJ1", "my-repo", gh_org="my-org", gh_repo_name="my-repo"
         )
 
+    @patch("bb2gh.migrator.remap_submodules_in_bare_repo")
     @patch("bb2gh.migrator.State")
     @patch("bb2gh.migrator.GithubClient")
     @patch("bb2gh.migrator.BitbucketClient")
     @patch("bb2gh.migrator._run_git")
-    def test_migrates_to_mapped_org(self, mock_git, MockBB, MockGH, MockState, mock_config):
+    def test_migrates_to_mapped_org(self, mock_git, MockBB, MockGH, MockState, mock_remap, mock_config):
         """Test that repos are migrated to the correct org when mapping is configured."""
         # Override resolve_target to return a different org
         mock_config.resolve_target = MagicMock(
@@ -152,11 +154,12 @@ class TestMigrateRepos:
         assert skipped == 1
         assert failed == 0
 
+    @patch("bb2gh.migrator.remap_submodules_in_bare_repo")
     @patch("bb2gh.migrator.State")
     @patch("bb2gh.migrator.GithubClient")
     @patch("bb2gh.migrator.BitbucketClient")
     @patch("bb2gh.migrator._run_git")
-    def test_respects_repo_filter(self, mock_git, MockBB, MockGH, MockState, mock_config):
+    def test_respects_repo_filter(self, mock_git, MockBB, MockGH, MockState, mock_remap, mock_config):
         """Test that repos filtered out by include/exclude_repos are skipped."""
         # Only allow "keep-me" through the filter
         mock_config.should_migrate_repo = MagicMock(

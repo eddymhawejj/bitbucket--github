@@ -7,6 +7,7 @@ import subprocess
 from .bitbucket_client import BitbucketClient
 from .github_client import GithubClient
 from .state import State
+from .submodules import remap_submodules_in_bare_repo
 
 logger = logging.getLogger(__name__)
 
@@ -138,7 +139,10 @@ def _migrate_single_repo(config, bb, gh, state, project_key, repo_slug, repo_nam
     # 3. Clean hidden refs
     _clean_hidden_refs(bare_path)
 
-    # 4. Add GitHub remote and push
+    # 4. Remap submodule URLs from Bitbucket to GitHub
+    remap_submodules_in_bare_repo(bare_path, config)
+
+    # 5. Add GitHub remote and push
     gh_clone_url = gh.get_clone_url(gh_repo_name, org_name=gh_org)
 
     # Remove existing github remote if present, then add
@@ -150,6 +154,6 @@ def _migrate_single_repo(config, bb, gh, state, project_key, repo_slug, repo_nam
     _run_git(["remote", "add", "github", gh_clone_url], cwd=bare_path)
     _run_git(["push", "--mirror", "github"], cwd=bare_path)
 
-    # 5. Record in state (includes the resolved GitHub org and repo name)
+    # 6. Record in state (includes the resolved GitHub org and repo name)
     state.mark_migrated(project_key, repo_slug, gh_org=gh_org, gh_repo_name=gh_repo_name)
     logger.info("Successfully migrated %s/%s -> %s/%s", project_key, repo_slug, gh_org, gh_repo_name)
