@@ -118,11 +118,18 @@ def _migrate_lfs(bare_path, threshold):
                   "+refs/tags/*:refs/tags/*"], cwd=bare_path)
         _run_git(["remote", "remove", "lfs-source"], cwd=bare_path)
 
-        # Copy LFS objects into the bare repo (only if any were created)
-        lfs_src = os.path.join(work_path, ".git", "lfs", "objects")
-        lfs_dst = os.path.join(bare_path, "lfs")
-        has_lfs_objects = os.path.exists(lfs_src) and os.listdir(lfs_src)
+        # Check if LFS actually tracked any files (not just empty dirs)
+        lfs_objects_dir = os.path.join(work_path, ".git", "lfs", "objects")
+        has_lfs_objects = False
+        if os.path.exists(lfs_objects_dir):
+            for dirpath, dirnames, filenames in os.walk(lfs_objects_dir):
+                if filenames:
+                    has_lfs_objects = True
+                    break
+
+        # Copy LFS objects into the bare repo only if real objects exist
         if has_lfs_objects:
+            lfs_dst = os.path.join(bare_path, "lfs")
             if os.path.exists(lfs_dst):
                 shutil.rmtree(lfs_dst)
             shutil.copytree(os.path.join(work_path, ".git", "lfs"), lfs_dst)
