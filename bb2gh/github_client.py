@@ -110,7 +110,7 @@ class GithubClient:
         """
         org = org_name or self.default_org
         if ssh_host:
-            return f"git@{ssh_host}:{org}/{repo_name}.git"
+            return f"ssh://git@{ssh_host}/{org}/{repo_name}.git"
         repo = self.get_repo(repo_name, org_name)
         url = repo.clone_url
         url = url.replace("https://", f"https://x-access-token:{self._token}@", 1)
