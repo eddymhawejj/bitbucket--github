@@ -26,8 +26,10 @@ github:
   # Default target organization on GitHub (used when no project-specific mapping exists)
   org: "my-org"
   # SSH hostname for GitHub (used for submodule URL remapping)
-  # Submodules that used SSH on Bitbucket will use SSH on GitHub
   ssh_host: "github.mycompany.com"
+  # SSH URL prefix for GitHub (used for push and submodule remapping)
+  # Use this if your GHE SSH user isn't "git" (e.g. ssh://myuser@host)
+  # ssh_url: "ssh://myuser@github.mycompany.com"
 
 sync:
   # Sync interval in seconds

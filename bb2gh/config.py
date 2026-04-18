@@ -29,6 +29,7 @@ class Config:
         self.gh_token = gh.get("token") or os.environ.get("GH_TOKEN", "")
         self.gh_org = gh["org"]
         self.gh_ssh_host = gh.get("ssh_host", "")
+        self.gh_ssh_url = gh.get("ssh_url", "")
 
         # Sync settings
         sync = raw.get("sync", {})

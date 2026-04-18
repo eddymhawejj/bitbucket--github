@@ -102,15 +102,15 @@ class GithubClient:
         repo.edit(default_branch=branch)
         logger.info("Set default branch for %s to %s", repo_name, branch)
 
-    def get_clone_url(self, repo_name, org_name=None, ssh_host=None):
+    def get_clone_url(self, repo_name, org_name=None, ssh_url=None):
         """Get the clone URL for a repo.
 
-        If ssh_host is provided, returns an SSH URL (git@host:org/repo.git).
-        Otherwise returns HTTPS with the token embedded.
+        If ssh_url is provided (e.g. "ssh://gatehousesatcom@host"), builds
+        an SSH URL. Otherwise returns HTTPS with the token embedded.
         """
         org = org_name or self.default_org
-        if ssh_host:
-            return f"ssh://git@{ssh_host}/{org}/{repo_name}.git"
+        if ssh_url:
+            return f"{ssh_url.rstrip('/')}/{org}/{repo_name}.git"
         repo = self.get_repo(repo_name, org_name)
         url = repo.clone_url
         url = url.replace("https://", f"https://x-access-token:{self._token}@", 1)

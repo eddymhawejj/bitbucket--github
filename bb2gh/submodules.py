@@ -81,9 +81,11 @@ def _parse_bb_url(url, bb_hostnames):
     return None
 
 
-def _is_already_github(url, gh_ssh_host, gh_https_base):
+def _is_already_github(url, gh_ssh_url, gh_ssh_host, gh_https_base):
     """Check if a URL already points to GitHub."""
-    if gh_ssh_host and (url.startswith(f"git@{gh_ssh_host}:") or url.startswith(f"ssh://git@{gh_ssh_host}/")):
+    if gh_ssh_url and url.startswith(gh_ssh_url.rstrip("/")):
+        return True
+    if gh_ssh_host and (url.startswith(f"git@{gh_ssh_host}:") or url.startswith(f"ssh://git@{gh_ssh_host}/") or url.startswith(f"ssh://{gh_ssh_host}/")):
         return True
     if gh_https_base and gh_https_base in url:
         return True
@@ -98,6 +100,7 @@ def remap_submodule_urls(content, config):
     of old and new URLs.
     """
     bb_hostnames = _build_bb_hostnames(config)
+    gh_ssh_url = config.gh_ssh_url
     gh_ssh_host = config.gh_ssh_host
     gh_https_base = config.gh_base_url.replace("/api/v3", "").rstrip("/")
 
@@ -111,7 +114,7 @@ def remap_submodule_urls(content, config):
         url = url.strip()
 
         # Already points to GitHub — skip
-        if _is_already_github(url, gh_ssh_host, gh_https_base):
+        if _is_already_github(url, gh_ssh_url, gh_ssh_host, gh_https_base):
             continue
 
         parsed = _parse_bb_url(url, bb_hostnames)
@@ -139,7 +142,9 @@ def remap_submodule_urls(content, config):
 
         gh_org, gh_repo = resolved
         is_ssh = url.startswith("ssh://")
-        if is_ssh and gh_ssh_host:
+        if is_ssh and gh_ssh_url:
+            new_url = f"{gh_ssh_url.rstrip('/')}/{gh_org}/{gh_repo}.git"
+        elif is_ssh and gh_ssh_host:
             new_url = f"ssh://git@{gh_ssh_host}/{gh_org}/{gh_repo}.git"
         else:
             new_url = f"{gh_https_base}/{gh_org}/{gh_repo}.git"

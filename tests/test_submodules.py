@@ -18,6 +18,7 @@ def mock_config():
     config.bb_projects = ["SYS_YAHSAT_NGSP", "SYS_COM", "DCKR", "NGRM"]
     config.bb_verify_ssl = True
     config.gh_ssh_host = "gatehousesatcom.ghe.com"
+    config.gh_ssh_url = "ssh://gatehousesatcom@gatehousesatcom.ghe.com"
     config.should_migrate_repo = MagicMock(return_value=True)
     config.resolve_target = MagicMock(
         side_effect=lambda proj, slug: ("networks-ngsp", slug)
@@ -37,8 +38,8 @@ class TestRemapSubmoduleUrls:
         )
         result = remap_submodule_urls(content, mock_config)
 
-        assert "ssh://git@gatehousesatcom.ghe.com/networks-ngsp/cai_lib.git" in result
-        assert "ssh://git@gatehousesatcom.ghe.com/networks-ngsp/cai_def.git" in result
+        assert "ssh://gatehousesatcom@gatehousesatcom.ghe.com/networks-ngsp/cai_lib.git" in result
+        assert "ssh://gatehousesatcom@gatehousesatcom.ghe.com/networks-ngsp/cai_def.git" in result
         assert "cph1-eud-rep001" not in result
 
     def test_remaps_fqdn_hostname_variant(self, mock_config):
@@ -50,7 +51,7 @@ class TestRemapSubmoduleUrls:
         )
         result = remap_submodule_urls(content, mock_config)
 
-        assert "ssh://git@gatehousesatcom.ghe.com/networks-ngsp/lib.git" in result
+        assert "ssh://gatehousesatcom@gatehousesatcom.ghe.com/networks-ngsp/lib.git" in result
         assert "cph1-eud-rep001" not in result
 
     def test_remaps_http_urls_to_https(self, mock_config):
@@ -115,12 +116,12 @@ class TestRemapSubmoduleUrls:
             "\turl = ssh://git@cph1-eud-rep001:7999/sys_yahsat_ngsp/bb_repo.git\n"
             "[submodule \"gh_repo\"]\n"
             "\tpath = gh_repo\n"
-            "\turl = ssh://git@gatehousesatcom.ghe.com/networks-ngsp/gh_repo.git\n"
+            "\turl = ssh://gatehousesatcom@gatehousesatcom.ghe.com/networks-ngsp/gh_repo.git\n"
         )
         result = remap_submodule_urls(content, mock_config)
 
-        assert "ssh://git@gatehousesatcom.ghe.com/networks-ngsp/bb_repo.git" in result
-        assert "ssh://git@gatehousesatcom.ghe.com/networks-ngsp/gh_repo.git" in result
+        assert "ssh://gatehousesatcom@gatehousesatcom.ghe.com/networks-ngsp/bb_repo.git" in result
+        assert "ssh://gatehousesatcom@gatehousesatcom.ghe.com/networks-ngsp/gh_repo.git" in result
 
     def test_ignores_external_urls(self, mock_config):
         """URLs pointing to external hosts (not BB) should be left alone."""
@@ -134,7 +135,7 @@ class TestRemapSubmoduleUrls:
         )
         result = remap_submodule_urls(content, mock_config)
 
-        assert "ssh://git@gatehousesatcom.ghe.com/networks-ngsp/bb_repo.git" in result
+        assert "ssh://gatehousesatcom@gatehousesatcom.ghe.com/networks-ngsp/bb_repo.git" in result
         assert "https://github.com/some/external.git" in result
 
     def test_handles_uppercase_project_in_url(self, mock_config):
@@ -145,7 +146,7 @@ class TestRemapSubmoduleUrls:
         )
         result = remap_submodule_urls(content, mock_config)
 
-        assert "ssh://git@gatehousesatcom.ghe.com/networks-ngsp/cai_lib.git" in result
+        assert "ssh://gatehousesatcom@gatehousesatcom.ghe.com/networks-ngsp/cai_lib.git" in result
 
     def test_empty_content(self, mock_config):
         assert remap_submodule_urls("", mock_config) == ""
@@ -170,7 +171,7 @@ class TestRemapSubmoduleUrls:
         )
         result = remap_submodule_urls(content, mock_config)
 
-        assert "ssh://git@gatehousesatcom.ghe.com/networks-ngsp/repo_a.git" in result
+        assert "ssh://gatehousesatcom@gatehousesatcom.ghe.com/networks-ngsp/repo_a.git" in result
         assert "https://gatehousesatcom.ghe.com/networks-ngsp/repo_b.git" in result
         assert "cph1-eud-rep001" not in result
 
@@ -186,8 +187,8 @@ class TestRemapSubmoduleUrls:
         )
         result = remap_submodule_urls(content, mock_config)
 
-        assert "ssh://git@gatehousesatcom.ghe.com/networks-ngsp/repo_a.git" in result
-        assert "ssh://git@gatehousesatcom.ghe.com/networks-ngsp/repo_b.git" in result
+        assert "ssh://gatehousesatcom@gatehousesatcom.ghe.com/networks-ngsp/repo_a.git" in result
+        assert "ssh://gatehousesatcom@gatehousesatcom.ghe.com/networks-ngsp/repo_b.git" in result
         assert "cph1-eud-rep001" not in result
 
     def test_uses_correct_org_per_project(self, mock_config):
@@ -207,11 +208,12 @@ class TestRemapSubmoduleUrls:
         )
         result = remap_submodule_urls(content, mock_config)
 
-        assert "ssh://git@gatehousesatcom.ghe.com/networks-ngsp/repo_a.git" in result
-        assert "ssh://git@gatehousesatcom.ghe.com/networks-docker/repo_b.git" in result
+        assert "ssh://gatehousesatcom@gatehousesatcom.ghe.com/networks-ngsp/repo_a.git" in result
+        assert "ssh://gatehousesatcom@gatehousesatcom.ghe.com/networks-docker/repo_b.git" in result
 
-    def test_falls_back_to_https_when_no_ssh_host(self, mock_config):
+    def test_falls_back_to_https_when_no_ssh(self, mock_config):
         mock_config.gh_ssh_host = ""
+        mock_config.gh_ssh_url = ""
         content = (
             "[submodule \"a\"]\n"
             "\tpath = a\n"

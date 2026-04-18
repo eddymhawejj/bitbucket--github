@@ -32,6 +32,7 @@ def mock_config(tmp_path):
     config.lfs_enabled = False
     config.lfs_threshold = "100mb"
     config.gh_ssh_host = ""
+    config.gh_ssh_url = ""
     return config
 
 
@@ -136,7 +137,7 @@ class TestMigrateRepos:
         gh_instance.create_repo.assert_called_once_with(
             "infra-my-repo", description="A test repo", private=True, org_name="infra-team"
         )
-        gh_instance.get_clone_url.assert_called_once_with("infra-my-repo", org_name="infra-team", ssh_host=None)
+        gh_instance.get_clone_url.assert_called_once_with("infra-my-repo", org_name="infra-team", ssh_url=None)
         state_instance.mark_migrated.assert_called_once_with(
             "PROJ1", "my-repo", gh_org="infra-team", gh_repo_name="infra-my-repo"
         )
