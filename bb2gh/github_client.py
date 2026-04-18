@@ -102,10 +102,16 @@ class GithubClient:
         repo.edit(default_branch=branch)
         logger.info("Set default branch for %s to %s", repo_name, branch)
 
-    def get_clone_url(self, repo_name, org_name=None):
-        """Get the HTTPS clone URL for a repo, with token embedded for auth."""
+    def get_clone_url(self, repo_name, org_name=None, ssh_host=None):
+        """Get the clone URL for a repo.
+
+        If ssh_host is provided, returns an SSH URL (git@host:org/repo.git).
+        Otherwise returns HTTPS with the token embedded.
+        """
+        org = org_name or self.default_org
+        if ssh_host:
+            return f"git@{ssh_host}:{org}/{repo_name}.git"
         repo = self.get_repo(repo_name, org_name)
         url = repo.clone_url
-        # Embed token so git push doesn't prompt for credentials
         url = url.replace("https://", f"https://x-access-token:{self._token}@", 1)
         return url

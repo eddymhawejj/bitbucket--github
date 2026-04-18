@@ -249,7 +249,7 @@ def _migrate_single_repo(config, bb, gh, state, project_key, repo_slug, repo_nam
         has_lfs = _migrate_lfs(bare_path, config.lfs_threshold)
 
     # 6. Add GitHub remote and push
-    gh_clone_url = gh.get_clone_url(gh_repo_name, org_name=gh_org)
+    gh_clone_url = gh.get_clone_url(gh_repo_name, org_name=gh_org, ssh_host=config.gh_ssh_host or None)
 
     # Remove existing github remote if present, then add
     try:
