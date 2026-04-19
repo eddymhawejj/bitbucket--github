@@ -57,10 +57,12 @@ def _clean_hidden_refs(bare_repo_path):
 def _has_large_blobs(bare_path, threshold):
     """Check if a bare repo has any blobs above the threshold.
 
-    Parses threshold strings like '100mb' and scans git objects.
-    Uses streaming pipes to handle repos with millions of objects.
+    Parses threshold strings like '100mb' and scans pack indices
+    directly via git verify-pack for reliable detection.
     Returns True if any blob exceeds the threshold.
     """
+    import glob
+
     t = threshold.lower().strip()
     if t.endswith("mb"):
         threshold_bytes = int(t[:-2]) * 1024 * 1024
@@ -71,29 +73,26 @@ def _has_large_blobs(bare_path, threshold):
     else:
         threshold_bytes = int(t)
 
-    # Stream rev-list into cat-file via pipe to avoid loading everything into memory
-    rev_list = subprocess.Popen(
-        ["git", "rev-list", "--objects", "--all"],
-        cwd=bare_path, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-    )
-    cat_file = subprocess.Popen(
-        ["git", "cat-file", "--batch-check=%(objecttype) %(objectsize)"],
-        cwd=bare_path, stdin=rev_list.stdout,
-        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
-    )
-    rev_list.stdout.close()
-
-    try:
-        for line in cat_file.stdout:
-            parts = line.split()
-            if len(parts) >= 2 and parts[0] == "blob":
-                if int(parts[1]) > threshold_bytes:
-                    return True
-    finally:
-        cat_file.terminate()
-        rev_list.terminate()
-        cat_file.wait()
-        rev_list.wait()
+    pack_files = glob.glob(os.path.join(bare_path, "objects", "pack", "*.idx"))
+    for pack_idx in pack_files:
+        proc = subprocess.Popen(
+            ["git", "verify-pack", "-v", pack_idx],
+            cwd=bare_path, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, text=True,
+        )
+        try:
+            for line in proc.stdout:
+                parts = line.split()
+                # Format: SHA type size size-in-pack offset [depth base-SHA]
+                if len(parts) >= 3 and parts[1] == "blob":
+                    try:
+                        if int(parts[2]) > threshold_bytes:
+                            return True
+                    except ValueError:
+                        continue
+        finally:
+            proc.terminate()
+            proc.wait()
     return False
 
 
