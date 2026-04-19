@@ -95,6 +95,8 @@ class Syncer:
         for project_key, repo_slug in repos:
             if not self._running:
                 break
+            if project_key.upper() in self.config.sync_exclude_projects:
+                continue
             try:
                 changed = self._sync_repo(project_key, repo_slug)
                 if changed:

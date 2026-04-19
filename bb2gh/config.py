@@ -36,6 +36,9 @@ class Config:
         self.sync_interval = sync.get("interval_seconds", 60)
         self.work_dir = sync.get("work_dir", "/data/mirror")
         self.migrate_delay = sync.get("migrate_delay_seconds", 2)
+        self.sync_exclude_projects = set(
+            p.upper() for p in sync.get("exclude_projects", [])
+        )
 
         # User mapping (Bitbucket username -> GitHub username)
         self.user_mapping = raw.get("user_mapping", {})

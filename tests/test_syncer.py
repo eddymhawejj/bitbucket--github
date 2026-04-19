@@ -17,6 +17,7 @@ def mock_config(tmp_path):
     config.lfs_enabled = False
     config.lfs_threshold = "100mb"
     config.migrate_delay = 0
+    config.sync_exclude_projects = set()
     return config
 
 
