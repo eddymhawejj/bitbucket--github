@@ -55,11 +55,10 @@ def _clean_hidden_refs(bare_repo_path):
 
 
 def _has_large_blobs(bare_path, threshold):
-    """Check if a bare repo has any blobs above the threshold.
+    """Check if a bare repo has any reachable blobs above the threshold.
 
-    Parses threshold strings like '100mb' and scans pack indices
-    directly via git verify-pack for reliable detection.
-    Returns True if any blob exceeds the threshold.
+    Only checks blobs reachable from refs (what push --mirror would send).
+    Uses a shell pipeline for reliable streaming on large repos.
     """
     import glob
 
@@ -73,27 +72,21 @@ def _has_large_blobs(bare_path, threshold):
     else:
         threshold_bytes = int(t)
 
-    pack_files = glob.glob(os.path.join(bare_path, "objects", "pack", "*.idx"))
-    for pack_idx in pack_files:
-        proc = subprocess.Popen(
-            ["git", "verify-pack", "-v", pack_idx],
-            cwd=bare_path, stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL, text=True,
-        )
-        try:
-            for line in proc.stdout:
-                parts = line.split()
-                # Format: SHA type size size-in-pack offset [depth base-SHA]
-                if len(parts) >= 3 and parts[1] == "blob":
-                    try:
-                        if int(parts[2]) > threshold_bytes:
-                            return True
-                    except ValueError:
-                        continue
-        finally:
-            proc.terminate()
-            proc.wait()
-    return False
+    # Shell pipeline: list reachable objects, strip paths, check sizes, stop at first match
+    cmd = (
+        "git rev-list --objects --all"
+        " | cut -d' ' -f1"
+        " | git cat-file --batch-check='%(objecttype) %(objectsize)'"
+        f" | awk '$1 == \"blob\" && $2 > {threshold_bytes} {{print; exit}}'"
+    )
+    proc = subprocess.Popen(
+        cmd, shell=True, cwd=bare_path,
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+    )
+    line = proc.stdout.readline()
+    proc.terminate()
+    proc.wait()
+    return len(line.strip()) > 0
 
 
 def _migrate_lfs(bare_path, threshold):
