@@ -24,7 +24,7 @@ class TestSyncer:
     @patch("bb2gh.syncer.State")
     @patch("bb2gh.syncer._run_git")
     def test_sync_repo_with_changes(self, mock_git, MockState, mock_config, tmp_path):
-        """Test syncing a repo when changes are detected."""
+        """Test syncing a repo when changes are detected (no prior snapshot)."""
         bare_path = tmp_path / "PROJ__my-repo.git"
         bare_path.mkdir()
 
@@ -32,18 +32,14 @@ class TestSyncer:
         state_instance.get_migrated_repos.return_value = [("PROJ", "my-repo")]
         state_instance.get_github_target.return_value = ("my-org", "my-repo")
 
-        # Return different refs before and after fetch to simulate changes
-        call_count = {"show_ref": 0}
         def side_effect(args, cwd=None, quiet=False):
             if args == ["show-ref"]:
-                call_count["show_ref"] += 1
-                if call_count["show_ref"] == 1:
-                    return "abc123 refs/heads/master"
-                return "def456 refs/heads/master"
+                return "abc123 refs/heads/master"
             return ""
 
         mock_git.side_effect = side_effect
 
+        # No prior snapshot file → should detect changes
         syncer = Syncer(mock_config)
         syncer._sync_all()
 
@@ -56,15 +52,18 @@ class TestSyncer:
     @patch("bb2gh.syncer.State")
     @patch("bb2gh.syncer._run_git")
     def test_sync_skips_when_no_changes(self, mock_git, MockState, mock_config, tmp_path):
-        """Test that sync skips push when nothing changed."""
+        """Test that sync skips push when BB refs match stored snapshot."""
         bare_path = tmp_path / "PROJ__my-repo.git"
         bare_path.mkdir()
+
+        # Write a prior snapshot matching what show-ref will return
+        refs_file = bare_path / "bb2gh_last_sync_refs"
+        refs_file.write_text("abc123 refs/heads/master")
 
         state_instance = MockState.return_value
         state_instance.get_migrated_repos.return_value = [("PROJ", "my-repo")]
         state_instance.get_github_target.return_value = ("my-org", "my-repo")
 
-        # Return same refs before and after fetch
         def side_effect(args, cwd=None, quiet=False):
             if args == ["show-ref"]:
                 return "abc123 refs/heads/master"
@@ -126,18 +125,15 @@ class TestSyncer:
         """Test that sync uses the stored GitHub target for logging."""
         bare_path = tmp_path / "INFRA__my-service.git"
         bare_path.mkdir()
+        # No prior snapshot → will detect changes
 
         state_instance = MockState.return_value
         state_instance.get_migrated_repos.return_value = [("INFRA", "my-service")]
         state_instance.get_github_target.return_value = ("infra-team", "infra-my-service")
 
-        call_count = {"show_ref": 0}
         def side_effect(args, cwd=None, quiet=False):
             if args == ["show-ref"]:
-                call_count["show_ref"] += 1
-                if call_count["show_ref"] == 1:
-                    return "aaa refs/heads/main"
-                return "bbb refs/heads/main"
+                return "aaa refs/heads/main"
             return ""
 
         mock_git.side_effect = side_effect

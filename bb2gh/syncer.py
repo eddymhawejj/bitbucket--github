@@ -125,24 +125,24 @@ class Syncer:
         gh_org, gh_repo_name = self.state.get_github_target(project_key, repo_slug)
         target_label = f"{gh_org}/{gh_repo_name}" if gh_org else "github"
 
-        # Snapshot refs before fetch to detect changes
-        try:
-            refs_before = _run_git(["show-ref"], cwd=bare_path, quiet=True)
-        except subprocess.CalledProcessError:
-            refs_before = ""
-
         # Fetch from Bitbucket (origin)
         _run_git(["fetch", "origin", "--prune",
                   "+refs/heads/*:refs/heads/*",
                   "+refs/tags/*:refs/tags/*"], cwd=bare_path)
 
-        # Check if anything changed
+        # Compare Bitbucket's refs (post-fetch) against last sync snapshot
         try:
-            refs_after = _run_git(["show-ref"], cwd=bare_path, quiet=True)
+            bb_refs = _run_git(["show-ref"], cwd=bare_path, quiet=True)
         except subprocess.CalledProcessError:
-            refs_after = ""
+            bb_refs = ""
 
-        if refs_before == refs_after:
+        refs_file = os.path.join(bare_path, "bb2gh_last_sync_refs")
+        last_refs = ""
+        if os.path.exists(refs_file):
+            with open(refs_file) as f:
+                last_refs = f.read()
+
+        if bb_refs == last_refs:
             logger.debug("No changes for %s/%s, skipping push", project_key, repo_slug)
             return False
 
@@ -171,6 +171,10 @@ class Syncer:
                 logger.warning("LFS push failed for %s/%s", project_key, repo_slug)
 
         elapsed = time.time() - start
+        # Store Bitbucket's refs so next cycle can detect real changes
+        with open(refs_file, "w") as f:
+            f.write(bb_refs)
+
         self.state.update_sync_time(project_key, repo_slug)
         logger.info(
             "Synced %s/%s -> %s in %.1fs",
