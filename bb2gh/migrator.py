@@ -58,6 +58,7 @@ def _has_large_blobs(bare_path, threshold):
     """Check if a bare repo has any blobs above the threshold.
 
     Parses threshold strings like '100mb' and scans git objects.
+    Uses streaming pipes to handle repos with millions of objects.
     Returns True if any blob exceeds the threshold.
     """
     t = threshold.lower().strip()
@@ -70,26 +71,29 @@ def _has_large_blobs(bare_path, threshold):
     else:
         threshold_bytes = int(t)
 
-    try:
-        rev_list = _run_git(
-            ["rev-list", "--objects", "--all"], cwd=bare_path, quiet=True
-        )
-    except subprocess.CalledProcessError:
-        return False
-
-    cmd = ["git", "cat-file", "--batch-check=%(objecttype) %(objectsize)"]
-    result = subprocess.run(
-        cmd, cwd=bare_path, input=rev_list,
-        capture_output=True, text=True, check=False,
+    # Stream rev-list into cat-file via pipe to avoid loading everything into memory
+    rev_list = subprocess.Popen(
+        ["git", "rev-list", "--objects", "--all"],
+        cwd=bare_path, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
     )
-    if result.returncode != 0:
-        return False
+    cat_file = subprocess.Popen(
+        ["git", "cat-file", "--batch-check=%(objecttype) %(objectsize)"],
+        cwd=bare_path, stdin=rev_list.stdout,
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+    )
+    rev_list.stdout.close()
 
-    for line in result.stdout.splitlines():
-        parts = line.split()
-        if len(parts) >= 2 and parts[0] == "blob":
-            if int(parts[1]) > threshold_bytes:
-                return True
+    try:
+        for line in cat_file.stdout:
+            parts = line.split()
+            if len(parts) >= 2 and parts[0] == "blob":
+                if int(parts[1]) > threshold_bytes:
+                    return True
+    finally:
+        cat_file.terminate()
+        rev_list.terminate()
+        cat_file.wait()
+        rev_list.wait()
     return False
 
 
