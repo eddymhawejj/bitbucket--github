@@ -13,7 +13,7 @@ from .submodules import remap_submodules_in_bare_repo
 logger = logging.getLogger(__name__)
 
 
-def _run_git(args, cwd=None):
+def _run_git(args, cwd=None, quiet=False):
     """Run a git command and return stdout."""
     cmd = ["git"] + args
     logger.debug("Running: %s", " ".join(cmd))
@@ -21,7 +21,8 @@ def _run_git(args, cwd=None):
         cmd, cwd=cwd, capture_output=True, text=True, check=False
     )
     if result.returncode != 0:
-        logger.error("git %s failed: %s", args[0], result.stderr.strip())
+        if not quiet:
+            logger.error("git %s failed: %s", args[0], result.stderr.strip())
         raise subprocess.CalledProcessError(
             result.returncode, cmd, result.stdout, result.stderr
         )
