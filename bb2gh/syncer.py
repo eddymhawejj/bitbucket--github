@@ -88,22 +88,30 @@ class Syncer:
             return
 
         synced = 0
+        skipped = 0
         failed = 0
 
         for project_key, repo_slug in repos:
             if not self._running:
                 break
             try:
-                self._sync_repo(project_key, repo_slug)
-                synced += 1
+                changed = self._sync_repo(project_key, repo_slug)
+                if changed:
+                    synced += 1
+                    time.sleep(self.config.migrate_delay)
+                else:
+                    skipped += 1
             except Exception:
                 logger.exception("Failed to sync %s/%s", project_key, repo_slug)
                 failed += 1
 
-        logger.info("Sync cycle complete: %d synced, %d failed", synced, failed)
+        logger.info(
+            "Sync cycle complete: %d synced, %d unchanged, %d failed",
+            synced, skipped, failed,
+        )
 
     def _sync_repo(self, project_key, repo_slug):
-        """Sync a single repo: fetch from Bitbucket, push to GitHub."""
+        """Sync a single repo: fetch from Bitbucket, push to GitHub only if changed."""
         bare_path = os.path.join(
             self.config.work_dir, f"{project_key}__{repo_slug}.git"
         )
@@ -116,12 +124,29 @@ class Syncer:
         gh_org, gh_repo_name = self.state.get_github_target(project_key, repo_slug)
         target_label = f"{gh_org}/{gh_repo_name}" if gh_org else "github"
 
-        start = time.time()
+        # Snapshot refs before fetch to detect changes
+        try:
+            refs_before = _run_git(["show-ref"], cwd=bare_path, quiet=True)
+        except subprocess.CalledProcessError:
+            refs_before = ""
 
         # Fetch from Bitbucket (origin)
         _run_git(["fetch", "origin", "--prune",
                   "+refs/heads/*:refs/heads/*",
                   "+refs/tags/*:refs/tags/*"], cwd=bare_path)
+
+        # Check if anything changed
+        try:
+            refs_after = _run_git(["show-ref"], cwd=bare_path, quiet=True)
+        except subprocess.CalledProcessError:
+            refs_after = ""
+
+        if refs_before == refs_after:
+            logger.debug("No changes for %s/%s, skipping push", project_key, repo_slug)
+            return False
+
+        logger.info("Changes detected for %s/%s, pushing...", project_key, repo_slug)
+        start = time.time()
 
         # Clean hidden refs before pushing
         _clean_hidden_refs(bare_path)
@@ -150,3 +175,4 @@ class Syncer:
             "Synced %s/%s -> %s in %.1fs",
             project_key, repo_slug, target_label, elapsed,
         )
+        return True
