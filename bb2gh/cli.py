@@ -236,5 +236,148 @@ def reset_lfs(ctx, dry_run):
         click.echo("Run 'bb2gh migrate' to re-migrate them with the current LFS threshold.")
 
 
+@cli.command()
+@click.option("--format", "fmt", type=click.Choice(["text", "csv"]), default="text",
+              help="Output format.")
+@click.option("--output", "output_file", default=None, help="Write report to file.")
+@click.pass_context
+def report(ctx, fmt, output_file):
+    """Generate a migration report from state.json.
+
+    Shows migrated repos, failed repos, submodule status, LFS status,
+    and any warnings.
+    """
+    import json
+
+    config = ctx.obj["config"]
+    from .state import State
+    state = State(config.work_dir)
+
+    data = state._data.get("repos", {})
+    if not data:
+        click.echo("No migration data found.")
+        return
+
+    migrated = []
+    failed = []
+    with_submodules = []
+    submodules_not_remapped = []
+    with_lfs = []
+    with_warnings = []
+
+    for key, entry in sorted(data.items()):
+        status = entry.get("status", "unknown")
+        if status == "migrated":
+            migrated.append(entry)
+        elif status == "failed":
+            failed.append(entry)
+
+        if entry.get("has_submodules"):
+            with_submodules.append(entry)
+            if not entry.get("submodules_remapped"):
+                submodules_not_remapped.append(entry)
+        if entry.get("has_lfs"):
+            with_lfs.append(entry)
+        if entry.get("warnings"):
+            with_warnings.append(entry)
+
+    lines = []
+
+    if fmt == "text":
+        lines.append("=" * 70)
+        lines.append("MIGRATION REPORT")
+        lines.append("=" * 70)
+        lines.append("")
+        lines.append(f"Total repos in state:     {len(data)}")
+        lines.append(f"  Migrated:               {len(migrated)}")
+        lines.append(f"  Failed:                 {len(failed)}")
+        lines.append(f"  With submodules:        {len(with_submodules)}")
+        lines.append(f"    Remapped:             {len(with_submodules) - len(submodules_not_remapped)}")
+        lines.append(f"    Not remapped:         {len(submodules_not_remapped)}")
+        lines.append(f"  With LFS:               {len(with_lfs)}")
+        lines.append(f"  With warnings:          {len(with_warnings)}")
+
+        if failed:
+            lines.append("")
+            lines.append("-" * 70)
+            lines.append("FAILED REPOS")
+            lines.append("-" * 70)
+            for entry in failed:
+                lines.append(f"  {entry['project_key']}/{entry['repo_slug']}")
+                lines.append(f"    Target: {entry.get('gh_org', '?')}/{entry.get('gh_repo_name', '?')}")
+                lines.append(f"    Error:  {entry.get('error', 'unknown')[:200]}")
+
+        if submodules_not_remapped:
+            lines.append("")
+            lines.append("-" * 70)
+            lines.append("SUBMODULES NOT REMAPPED")
+            lines.append("-" * 70)
+            for entry in submodules_not_remapped:
+                lines.append(f"  {entry['project_key']}/{entry['repo_slug']} -> {entry.get('gh_org')}/{entry.get('gh_repo_name')}")
+
+        if with_lfs:
+            lines.append("")
+            lines.append("-" * 70)
+            lines.append("REPOS WITH LFS")
+            lines.append("-" * 70)
+            for entry in with_lfs:
+                lines.append(f"  {entry['project_key']}/{entry['repo_slug']} -> {entry.get('gh_org')}/{entry.get('gh_repo_name')}")
+
+        if with_warnings:
+            lines.append("")
+            lines.append("-" * 70)
+            lines.append("WARNINGS")
+            lines.append("-" * 70)
+            for entry in with_warnings:
+                for w in entry.get("warnings", []):
+                    lines.append(f"  {entry['project_key']}/{entry['repo_slug']}: {w}")
+
+        if migrated:
+            lines.append("")
+            lines.append("-" * 70)
+            lines.append("ALL MIGRATED REPOS")
+            lines.append("-" * 70)
+            for entry in migrated:
+                flags = []
+                if entry.get("has_submodules"):
+                    flags.append("submodules")
+                if entry.get("has_lfs"):
+                    flags.append("LFS")
+                if entry.get("warnings"):
+                    flags.append("warnings")
+                flag_str = f" [{', '.join(flags)}]" if flags else ""
+                lines.append(
+                    f"  {entry['project_key']}/{entry['repo_slug']} "
+                    f"-> {entry.get('gh_org')}/{entry.get('gh_repo_name')}{flag_str}"
+                )
+
+    elif fmt == "csv":
+        lines.append("status,bb_project,bb_repo,gh_org,gh_repo,has_submodules,submodules_remapped,has_lfs,warnings,error")
+        for key, entry in sorted(data.items()):
+            warnings_str = "; ".join(entry.get("warnings", []))
+            error_str = entry.get("error", "").replace(",", " ")[:200]
+            lines.append(
+                f"{entry.get('status', 'unknown')},"
+                f"{entry.get('project_key', '')},"
+                f"{entry.get('repo_slug', '')},"
+                f"{entry.get('gh_org', '')},"
+                f"{entry.get('gh_repo_name', '')},"
+                f"{entry.get('has_submodules', False)},"
+                f"{entry.get('submodules_remapped', False)},"
+                f"{entry.get('has_lfs', False)},"
+                f"\"{warnings_str}\","
+                f"\"{error_str}\""
+            )
+
+    output = "\n".join(lines)
+
+    if output_file:
+        with open(output_file, "w") as f:
+            f.write(output + "\n")
+        click.echo(f"Report written to {output_file}")
+    else:
+        click.echo(output)
+
+
 if __name__ == "__main__":
     cli()

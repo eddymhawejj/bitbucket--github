@@ -31,7 +31,9 @@ class State:
     def _now(self):
         return datetime.now(timezone.utc).isoformat()
 
-    def mark_migrated(self, project_key, repo_slug, gh_org=None, gh_repo_name=None):
+    def mark_migrated(self, project_key, repo_slug, gh_org=None, gh_repo_name=None,
+                      has_submodules=False, submodules_remapped=False,
+                      has_lfs=False, warnings=None):
         """Record that a repo has been migrated.
 
         Args:
@@ -39,6 +41,10 @@ class State:
             repo_slug: Bitbucket repo slug.
             gh_org: GitHub organization the repo was migrated to.
             gh_repo_name: GitHub repository name.
+            has_submodules: Whether the repo has .gitmodules.
+            submodules_remapped: Whether submodule URLs were remapped.
+            has_lfs: Whether large files were converted to LFS.
+            warnings: List of warning strings.
         """
         key = f"{project_key}/{repo_slug}"
         self._data["repos"][key] = {
@@ -49,10 +55,29 @@ class State:
             "status": "migrated",
             "migrated_at": self._now(),
             "last_sync": self._now(),
+            "has_submodules": has_submodules,
+            "submodules_remapped": submodules_remapped,
+            "has_lfs": has_lfs,
+            "warnings": warnings or [],
             "pr_mappings": {},
         }
         self._save()
         logger.info("Marked %s as migrated -> %s/%s", key, gh_org, gh_repo_name)
+
+    def record_failure(self, project_key, repo_slug, error_message,
+                       gh_org=None, gh_repo_name=None):
+        """Record that a repo failed to migrate."""
+        key = f"{project_key}/{repo_slug}"
+        self._data["repos"][key] = {
+            "project_key": project_key,
+            "repo_slug": repo_slug,
+            "gh_org": gh_org,
+            "gh_repo_name": gh_repo_name,
+            "status": "failed",
+            "failed_at": self._now(),
+            "error": error_message,
+        }
+        self._save()
 
     def update_sync_time(self, project_key, repo_slug):
         """Update the last sync timestamp for a repo."""

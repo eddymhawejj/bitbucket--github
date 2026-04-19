@@ -63,7 +63,7 @@ class TestCleanHiddenRefs:
 
 
 class TestMigrateRepos:
-    @patch("bb2gh.migrator.remap_submodules_in_bare_repo")
+    @patch("bb2gh.migrator.remap_submodules_in_bare_repo", return_value=0)
     @patch("bb2gh.migrator.State")
     @patch("bb2gh.migrator.GithubClient")
     @patch("bb2gh.migrator.BitbucketClient")
@@ -93,14 +93,14 @@ class TestMigrateRepos:
         assert migrated == 1
         assert skipped == 0
         assert failed == 0
-        # resolve_target should be called to determine the GitHub org and repo name
         mock_config.resolve_target.assert_called_once_with("PROJ1", "my-repo")
-        # State should record with org and repo name
-        state_instance.mark_migrated.assert_called_once_with(
-            "PROJ1", "my-repo", gh_org="my-org", gh_repo_name="my-repo"
-        )
+        state_instance.mark_migrated.assert_called_once()
+        call_kwargs = state_instance.mark_migrated.call_args
+        assert call_kwargs[0][:2] == ("PROJ1", "my-repo")
+        assert call_kwargs[1]["gh_org"] == "my-org"
+        assert call_kwargs[1]["gh_repo_name"] == "my-repo"
 
-    @patch("bb2gh.migrator.remap_submodules_in_bare_repo")
+    @patch("bb2gh.migrator.remap_submodules_in_bare_repo", return_value=0)
     @patch("bb2gh.migrator.State")
     @patch("bb2gh.migrator.GithubClient")
     @patch("bb2gh.migrator.BitbucketClient")
@@ -138,9 +138,10 @@ class TestMigrateRepos:
             "infra-my-repo", description="A test repo", private=True, org_name="infra-team"
         )
         gh_instance.get_clone_url.assert_called_once_with("infra-my-repo", org_name="infra-team", ssh_url=None)
-        state_instance.mark_migrated.assert_called_once_with(
-            "PROJ1", "my-repo", gh_org="infra-team", gh_repo_name="infra-my-repo"
-        )
+        state_instance.mark_migrated.assert_called_once()
+        call_kwargs = state_instance.mark_migrated.call_args
+        assert call_kwargs[1]["gh_org"] == "infra-team"
+        assert call_kwargs[1]["gh_repo_name"] == "infra-my-repo"
 
     @patch("bb2gh.migrator.State")
     @patch("bb2gh.migrator.GithubClient")
@@ -158,7 +159,7 @@ class TestMigrateRepos:
         assert skipped == 1
         assert failed == 0
 
-    @patch("bb2gh.migrator.remap_submodules_in_bare_repo")
+    @patch("bb2gh.migrator.remap_submodules_in_bare_repo", return_value=0)
     @patch("bb2gh.migrator.State")
     @patch("bb2gh.migrator.GithubClient")
     @patch("bb2gh.migrator.BitbucketClient")
@@ -191,8 +192,8 @@ class TestMigrateRepos:
         assert migrated == 1
         assert skipped == 2  # two filtered out
         assert failed == 0
-        # Only the allowed repo gets created on GitHub
         gh_instance.create_repo.assert_called_once()
-        state_instance.mark_migrated.assert_called_once_with(
-            "PROJ1", "keep-me", gh_org="my-org", gh_repo_name="keep-me"
-        )
+        state_instance.mark_migrated.assert_called_once()
+        call_kwargs = state_instance.mark_migrated.call_args
+        assert call_kwargs[0][:2] == ("PROJ1", "keep-me")
+        assert call_kwargs[1]["gh_org"] == "my-org"

@@ -236,8 +236,13 @@ def migrate_repos(config):
                     config, bb, gh, state, project_key, repo_slug, repo_name, repo
                 )
                 total_migrated += 1
-            except Exception:
+            except Exception as e:
                 logger.exception("Failed to migrate %s/%s", project_key, repo_slug)
+                gh_org, gh_repo_name = config.resolve_target(project_key, repo_slug)
+                state.record_failure(
+                    project_key, repo_slug, str(e),
+                    gh_org=gh_org, gh_repo_name=gh_repo_name,
+                )
                 total_failed += 1
 
     logger.info(
@@ -283,8 +288,20 @@ def _migrate_single_repo(config, bb, gh, state, project_key, repo_slug, repo_nam
     # 3. Clean hidden refs
     _clean_hidden_refs(bare_path)
 
+    # Track migration details
+    warnings = []
+
     # 4. Remap submodule URLs from Bitbucket to GitHub
-    remap_submodules_in_bare_repo(bare_path, config)
+    submodules_remapped = remap_submodules_in_bare_repo(bare_path, config)
+    has_submodules = submodules_remapped > 0
+    # Check if repo has .gitmodules but remap returned 0 (skipped due to unresolvable URLs)
+    try:
+        _run_git(["show", "HEAD:.gitmodules"], cwd=bare_path, quiet=True)
+        has_submodules = True
+        if submodules_remapped == 0:
+            warnings.append("Has .gitmodules but submodule URLs could not be fully remapped")
+    except subprocess.CalledProcessError:
+        pass
 
     # 5. Migrate large files to LFS if enabled
     has_lfs = False
@@ -309,6 +326,7 @@ def _migrate_single_repo(config, bb, gh, state, project_key, repo_slug, repo_nam
             _run_git(["lfs", "push", "--all", "github"], cwd=bare_path)
         except subprocess.CalledProcessError:
             logger.warning("LFS push failed for %s/%s", gh_org, gh_repo_name)
+            warnings.append("LFS push failed")
 
     # 7. Set default branch on GitHub to match Bitbucket's HEAD
     try:
@@ -317,7 +335,12 @@ def _migrate_single_repo(config, bb, gh, state, project_key, repo_slug, repo_nam
         gh.set_default_branch(gh_repo_name, default_branch, org_name=gh_org)
     except Exception:
         logger.warning("Could not set default branch for %s/%s", gh_org, gh_repo_name)
+        warnings.append("Could not set default branch")
 
-    # 7. Record in state (includes the resolved GitHub org and repo name)
-    state.mark_migrated(project_key, repo_slug, gh_org=gh_org, gh_repo_name=gh_repo_name)
+    # 8. Record in state
+    state.mark_migrated(
+        project_key, repo_slug, gh_org=gh_org, gh_repo_name=gh_repo_name,
+        has_submodules=has_submodules, submodules_remapped=submodules_remapped > 0,
+        has_lfs=has_lfs, warnings=warnings,
+    )
     logger.info("Successfully migrated %s/%s -> %s/%s", project_key, repo_slug, gh_org, gh_repo_name)
