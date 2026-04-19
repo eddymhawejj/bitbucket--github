@@ -54,6 +54,45 @@ def _clean_hidden_refs(bare_repo_path):
                 logger.warning("Failed to delete ref: %s", ref)
 
 
+def _has_large_blobs(bare_path, threshold):
+    """Check if a bare repo has any blobs above the threshold.
+
+    Parses threshold strings like '100mb' and scans git objects.
+    Returns True if any blob exceeds the threshold.
+    """
+    t = threshold.lower().strip()
+    if t.endswith("mb"):
+        threshold_bytes = int(t[:-2]) * 1024 * 1024
+    elif t.endswith("gb"):
+        threshold_bytes = int(t[:-2]) * 1024 * 1024 * 1024
+    elif t.endswith("kb"):
+        threshold_bytes = int(t[:-2]) * 1024
+    else:
+        threshold_bytes = int(t)
+
+    try:
+        rev_list = _run_git(
+            ["rev-list", "--objects", "--all"], cwd=bare_path, quiet=True
+        )
+    except subprocess.CalledProcessError:
+        return False
+
+    cmd = ["git", "cat-file", "--batch-check=%(objecttype) %(objectsize)"]
+    result = subprocess.run(
+        cmd, cwd=bare_path, input=rev_list,
+        capture_output=True, text=True, check=False,
+    )
+    if result.returncode != 0:
+        return False
+
+    for line in result.stdout.splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[0] == "blob":
+            if int(parts[1]) > threshold_bytes:
+                return True
+    return False
+
+
 def _migrate_lfs(bare_path, threshold):
     """Convert files above threshold to Git LFS in all branches.
 
@@ -64,7 +103,11 @@ def _migrate_lfs(bare_path, threshold):
     import shutil
     import tempfile
 
-    logger.info("Running LFS migration (threshold: %s) in %s", threshold, bare_path)
+    if not _has_large_blobs(bare_path, threshold):
+        logger.info("LFS: no files above %s in %s, skipping", threshold, os.path.basename(bare_path))
+        return False
+
+    logger.info("LFS: large files detected, migrating (threshold: %s) in %s", threshold, bare_path)
     tmp_dir = tempfile.mkdtemp(suffix=".lfs-migrate")
     try:
         work_path = os.path.join(tmp_dir, "work")
