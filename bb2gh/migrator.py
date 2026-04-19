@@ -248,6 +248,10 @@ def migrate_repos(config):
                 )
                 total_failed += 1
 
+            # Throttle between repos to avoid SSH/API rate limits
+            import time
+            time.sleep(config.migrate_delay)
+
     logger.info(
         "Migration complete: %d migrated, %d skipped, %d failed",
         total_migrated, total_skipped, total_failed,

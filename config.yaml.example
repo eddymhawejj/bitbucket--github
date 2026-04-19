@@ -36,6 +36,8 @@ sync:
   interval_seconds: 60
   # Local directory for bare repo clones
   work_dir: "/data/mirror"
+  # Delay between repos during migration (seconds) to avoid SSH/API rate limits
+  migrate_delay_seconds: 2
 
 # Optional: map Bitbucket projects/repos to specific GitHub orgs/repo names.
 # Without this section, all repos go to github.org with their original slug as name.

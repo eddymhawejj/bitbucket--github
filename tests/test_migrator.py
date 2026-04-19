@@ -33,6 +33,7 @@ def mock_config(tmp_path):
     config.lfs_threshold = "100mb"
     config.gh_ssh_host = ""
     config.gh_ssh_url = ""
+    config.migrate_delay = 0
     return config
 
 
