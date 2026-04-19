@@ -97,12 +97,10 @@ def reset(ctx, project, repo, reset_all, dry_run):
     from .state import State
     state = State(config.work_dir)
 
-    repos = state.get_migrated_repos()
+    repos = state.get_all_repos()
     if not repos:
-        click.echo("No migrated repos found.")
+        click.echo("No repos found in state.")
         return
-
-    projects_set = set(p.upper() for p in project)
     repos_set = set(repo)
 
     reset_count = 0
@@ -151,9 +149,9 @@ def reset_submodules(ctx, dry_run):
     from .state import State
     state = State(config.work_dir)
 
-    repos = state.get_migrated_repos()
+    repos = state.get_all_repos()
     if not repos:
-        click.echo("No migrated repos found.")
+        click.echo("No repos found in state.")
         return
 
     reset_count = 0
@@ -199,9 +197,9 @@ def reset_lfs(ctx, dry_run):
     from .state import State
     state = State(config.work_dir)
 
-    repos = state.get_migrated_repos()
+    repos = state.get_all_repos()
     if not repos:
-        click.echo("No migrated repos found.")
+        click.echo("No repos found in state.")
         return
 
     reset_count = 0

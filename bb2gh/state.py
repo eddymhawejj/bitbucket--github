@@ -97,8 +97,15 @@ class State:
         """Return list of (project_key, repo_slug) for all migrated repos."""
         result = []
         for entry in self._data["repos"].values():
-            if entry["status"] == "migrated":
+            if entry.get("status") == "migrated":
                 result.append((entry["project_key"], entry["repo_slug"]))
+        return result
+
+    def get_all_repos(self):
+        """Return list of (project_key, repo_slug) for all repos in state."""
+        result = []
+        for entry in self._data["repos"].values():
+            result.append((entry["project_key"], entry["repo_slug"]))
         return result
 
     def get_github_target(self, project_key, repo_slug):
@@ -121,9 +128,10 @@ class State:
         return False
 
     def is_migrated(self, project_key, repo_slug):
-        """Check if a repo has been migrated."""
+        """Check if a repo has been successfully migrated."""
         key = f"{project_key}/{repo_slug}"
-        return key in self._data["repos"]
+        entry = self._data["repos"].get(key, {})
+        return entry.get("status") == "migrated"
 
     def is_pr_migrated(self, project_key, repo_slug, bb_pr_id):
         """Check if a specific PR has already been migrated."""
