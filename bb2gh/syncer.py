@@ -6,7 +6,6 @@ import signal
 import subprocess
 import time
 
-from .migrator import _migrate_lfs
 from .state import State
 from .submodules import remap_submodules_in_bare_repo
 
@@ -157,20 +156,8 @@ class Syncer:
         # Remap submodule URLs from Bitbucket to GitHub
         remap_submodules_in_bare_repo(bare_path, self.config)
 
-        # Migrate large files to LFS if enabled
-        has_lfs = False
-        if self.config.lfs_enabled:
-            has_lfs = _migrate_lfs(bare_path, self.config.lfs_threshold)
-
         # Push to GitHub
         _run_git(["push", "github", "--mirror"], cwd=bare_path)
-
-        # Push LFS objects — only if LFS actually converted files
-        if has_lfs:
-            try:
-                _run_git(["lfs", "push", "--all", "github"], cwd=bare_path)
-            except subprocess.CalledProcessError:
-                logger.warning("LFS push failed for %s/%s", project_key, repo_slug)
 
         elapsed = time.time() - start
         # Store Bitbucket's refs so next cycle can detect real changes
