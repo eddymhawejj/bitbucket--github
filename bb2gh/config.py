@@ -36,6 +36,7 @@ class Config:
         self.sync_interval = sync.get("interval_seconds", 60)
         self.work_dir = sync.get("work_dir", "/data/mirror")
         self.migrate_delay = sync.get("migrate_delay_seconds", 2)
+        self.sync_lfs_timeout = sync.get("sync_lfs_timeout_seconds", 60)
         self.sync_exclude_projects = set(
             p.upper() for p in sync.get("exclude_projects", [])
         )

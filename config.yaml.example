@@ -38,6 +38,8 @@ sync:
   work_dir: "/data/mirror"
   # Delay between repos during migration (seconds) to avoid SSH/API rate limits
   migrate_delay_seconds: 2
+  # Max time (seconds) for LFS migration during sync (default: 60)
+  sync_lfs_timeout_seconds: 60
   # Projects to exclude from continuous sync (still migrated, just not synced)
   # exclude_projects:
   #   - UPSTREAM

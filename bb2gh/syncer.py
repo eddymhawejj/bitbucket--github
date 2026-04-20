@@ -162,7 +162,7 @@ class Syncer:
         has_lfs = False
         if self.config.lfs_enabled and _has_large_blobs(bare_path, self.config.lfs_threshold):
             try:
-                has_lfs = _migrate_lfs(bare_path, self.config.lfs_threshold, timeout=60)
+                has_lfs = _migrate_lfs(bare_path, self.config.lfs_threshold, timeout=self.config.sync_lfs_timeout)
             except subprocess.TimeoutExpired:
                 logger.warning("LFS migration timed out for %s/%s, skipping LFS", project_key, repo_slug)
             except Exception:
