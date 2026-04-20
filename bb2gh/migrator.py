@@ -3,6 +3,7 @@
 import logging
 import os
 import subprocess
+import time
 
 from .bitbucket_client import BitbucketClient
 from .github_client import GithubClient
@@ -89,7 +90,7 @@ def _has_large_blobs(bare_path, threshold):
     return len(line.strip()) > 0
 
 
-def _migrate_lfs(bare_path, threshold):
+def _migrate_lfs(bare_path, threshold, timeout=None):
     """Convert files above threshold to Git LFS in all branches.
 
     git lfs migrate import requires a working tree, so we clone the
@@ -105,6 +106,7 @@ def _migrate_lfs(bare_path, threshold):
 
     logger.info("LFS: large files detected, migrating (threshold: %s) in %s", threshold, bare_path)
     tmp_dir = tempfile.mkdtemp(suffix=".lfs-migrate")
+    deadline = time.time() + timeout if timeout else None
     try:
         work_path = os.path.join(tmp_dir, "work")
         # Skip LFS smudge during clone — repo may already have LFS pointers
@@ -113,9 +115,10 @@ def _migrate_lfs(bare_path, threshold):
             "GIT_LFS_SKIP_SMUDGE": "1",
         }
         cmd = ["git", "clone", bare_path, work_path]
+        remaining = int(deadline - time.time()) if deadline else None
         result = subprocess.run(
             cmd, capture_output=True, text=True, check=False,
-            env={**os.environ, **env_no_lfs},
+            env={**os.environ, **env_no_lfs}, timeout=remaining,
         )
         if result.returncode != 0:
             logger.error("git clone failed: %s", result.stderr.strip())
@@ -136,19 +139,24 @@ def _migrate_lfs(bare_path, threshold):
                 pass  # Already exists (default branch)
 
         _run_git(["lfs", "install"], cwd=work_path)
-        try:
-            _run_git(
-                ["lfs", "migrate", "import", "--everything",
-                 f"--above={threshold}", "--yes"],
-                cwd=work_path,
-            )
-        except subprocess.CalledProcessError as e:
-            # LFS migrate may fail on post-rewrite checkout (unborn branch, etc.)
-            # but the rewrite itself completed. Check stderr for this case.
-            if "Could not checkout" in (e.stderr or "") and "Rewriting commits" in (e.stderr or ""):
+        remaining = int(deadline - time.time()) if deadline else None
+        if remaining is not None and remaining <= 0:
+            raise subprocess.TimeoutExpired("git lfs migrate", timeout)
+        lfs_cmd = ["git", "lfs", "migrate", "import", "--everything",
+                   f"--above={threshold}", "--yes"]
+        lfs_result = subprocess.run(
+            lfs_cmd, cwd=work_path, capture_output=True, text=True,
+            check=False, timeout=remaining,
+        )
+        if lfs_result.returncode != 0:
+            stderr = lfs_result.stderr or ""
+            if "Could not checkout" in stderr and "Rewriting commits" in stderr:
                 logger.warning("LFS rewrite completed but checkout failed (harmless)")
             else:
-                raise
+                logger.error("git lfs migrate failed: %s", stderr.strip())
+                raise subprocess.CalledProcessError(
+                    lfs_result.returncode, lfs_cmd, lfs_result.stdout, stderr
+                )
 
         # Fetch rewritten branches and tags back into the bare repo
         _run_git(["remote", "add", "lfs-source", work_path], cwd=bare_path)

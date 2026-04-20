@@ -158,9 +158,15 @@ class Syncer:
         remap_submodules_in_bare_repo(bare_path, self.config)
 
         # LFS: only run if repo actually has large blobs (fast pre-check)
+        # Timeout after 60s to avoid blocking the sync cycle
         has_lfs = False
         if self.config.lfs_enabled and _has_large_blobs(bare_path, self.config.lfs_threshold):
-            has_lfs = _migrate_lfs(bare_path, self.config.lfs_threshold)
+            try:
+                has_lfs = _migrate_lfs(bare_path, self.config.lfs_threshold, timeout=60)
+            except subprocess.TimeoutExpired:
+                logger.warning("LFS migration timed out for %s/%s, skipping LFS", project_key, repo_slug)
+            except Exception:
+                logger.warning("LFS migration failed for %s/%s, skipping LFS", project_key, repo_slug)
 
         # Push to GitHub
         _run_git(["push", "github", "--mirror"], cwd=bare_path)
