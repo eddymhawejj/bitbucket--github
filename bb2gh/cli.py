@@ -36,15 +36,17 @@ def cli(ctx, config_path, verbose):
 
 
 @cli.command()
+@click.option("--repo", multiple=True, help="Migrate specific repos only (PROJECT/SLUG, can repeat).")
 @click.pass_context
-def migrate(ctx):
+def migrate(ctx, repo):
     """Bulk migrate all repositories from Bitbucket to GitHub.
 
     Clones repos via SSH, creates them on GitHub, and pushes all
     branches, tags, and history.
     """
     config = ctx.obj["config"]
-    migrated, skipped, failed = migrate_repos(config)
+    only_repos = set(repo) if repo else None
+    migrated, skipped, failed = migrate_repos(config, only_repos=only_repos)
     click.echo(f"\nMigration complete: {migrated} migrated, {skipped} skipped, {failed} failed")
     if failed > 0:
         sys.exit(1)

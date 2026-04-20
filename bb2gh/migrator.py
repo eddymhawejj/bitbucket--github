@@ -183,16 +183,13 @@ def _migrate_lfs(bare_path, threshold):
     return has_lfs_objects
 
 
-def migrate_repos(config):
+def migrate_repos(config, only_repos=None):
     """Run the full bulk migration.
 
-    For each repo in Bitbucket:
-    1. Resolve the target GitHub org and repo name via config mapping
-    2. Create the repo on GitHub
-    3. Bare-clone from Bitbucket via SSH
-    4. Clean hidden refs
-    5. Push --mirror to GitHub
-    6. Record in state
+    Args:
+        config: Config object.
+        only_repos: Optional set of "PROJECT/SLUG" strings to migrate.
+                    If provided, only these repos are processed.
     """
     bb = BitbucketClient(config.bb_base_url, config.bb_token, verify_ssl=config.bb_verify_ssl)
     gh = GithubClient(config.gh_base_url, config.gh_token, config.gh_org)
@@ -200,7 +197,11 @@ def migrate_repos(config):
 
     os.makedirs(config.work_dir, exist_ok=True)
 
-    projects = config.bb_projects or [p["key"] for p in bb.list_projects()]
+    if only_repos:
+        # Extract unique project keys from the repo list
+        projects = list({r.split("/")[0] for r in only_repos})
+    else:
+        projects = config.bb_projects or [p["key"] for p in bb.list_projects()]
 
     total_migrated = 0
     total_skipped = 0
@@ -213,6 +214,9 @@ def migrate_repos(config):
         for repo in repos:
             repo_slug = repo["slug"]
             repo_name = repo.get("name", repo_slug)
+
+            if only_repos and f"{project_key}/{repo_slug}" not in only_repos:
+                continue
 
             if not config.should_migrate_repo(project_key, repo_slug):
                 logger.info(
