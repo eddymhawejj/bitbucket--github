@@ -103,6 +103,8 @@ def reset(ctx, project, repo, reset_all, dry_run):
     if not repos:
         click.echo("No repos found in state.")
         return
+
+    projects_set = set(p.upper() for p in project)
     repos_set = set(repo)
 
     reset_count = 0
