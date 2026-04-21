@@ -128,9 +128,13 @@ class Syncer:
         target_label = f"{gh_org}/{gh_repo_name}" if gh_org else "github"
 
         # Fetch from Bitbucket (origin)
-        _run_git(["fetch", "origin", "--prune",
-                  "+refs/heads/*:refs/heads/*",
-                  "+refs/tags/*:refs/tags/*"], cwd=bare_path)
+        fetch_cmd = ["fetch", "origin", "--prune",
+                     "+refs/heads/*:refs/heads/*",
+                     "+refs/tags/*:refs/tags/*"]
+        trim_since = self.config.get_trim_since(project_key, repo_slug)
+        if trim_since:
+            fetch_cmd.extend(["--shallow-since", trim_since])
+        _run_git(fetch_cmd, cwd=bare_path)
 
         # Compare Bitbucket's refs (post-fetch) against last sync snapshot
         try:

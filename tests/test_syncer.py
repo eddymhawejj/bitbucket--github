@@ -18,6 +18,7 @@ def mock_config(tmp_path):
     config.lfs_threshold = "100mb"
     config.migrate_delay = 0
     config.sync_exclude_projects = set()
+    config.get_trim_since = MagicMock(return_value=None)
     return config
 
 

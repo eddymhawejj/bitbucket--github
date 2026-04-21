@@ -49,6 +49,9 @@ class Config:
         self.lfs_enabled = lfs.get("enabled", False)
         self.lfs_threshold = lfs.get("threshold", "100mb")
 
+        # History trimming (repo-specific)
+        self.trim_history = raw.get("trim_history", {})
+
         # Repository mapping (Bitbucket project/repo -> GitHub org/repo)
         rm = raw.get("repo_mapping", {})
         self._repo_mapping = rm
@@ -90,6 +93,37 @@ class Config:
             )
 
         return gh_org, gh_repo
+
+    def get_trim_since(self, project_key, repo_slug):
+        """Get the --shallow-since date for a repo, or None if no trimming.
+
+        Config format:
+            trim_history:
+              UPSTREAM/linux: "2y"
+              UPSTREAM/git: "1y"
+
+        Supports: Ny (years), Nm (months), Nd (days).
+        Returns an ISO date string or None.
+        """
+        from datetime import datetime, timedelta
+
+        key = f"{project_key}/{repo_slug}"
+        period = self.trim_history.get(key)
+        if not period:
+            return None
+
+        period = period.strip().lower()
+        if period.endswith("y"):
+            delta = timedelta(days=int(period[:-1]) * 365)
+        elif period.endswith("m"):
+            delta = timedelta(days=int(period[:-1]) * 30)
+        elif period.endswith("d"):
+            delta = timedelta(days=int(period[:-1]))
+        else:
+            return None
+
+        since = datetime.now() - delta
+        return since.strftime("%Y-%m-%d")
 
     def should_migrate_repo(self, project_key, repo_slug):
         """Check if a repo should be migrated based on include/exclude lists.

@@ -281,13 +281,17 @@ def _migrate_single_repo(config, bb, gh, state, project_key, repo_slug, repo_nam
 
     # 2. Bare clone from Bitbucket
     bare_path = os.path.join(config.work_dir, f"{project_key}__{repo_slug}.git")
+    trim_since = config.get_trim_since(project_key, repo_slug)
 
     if os.path.exists(bare_path):
         # Already cloned, fetch latest
         logger.info("Bare clone exists, fetching latest: %s", bare_path)
-        _run_git(["fetch", "origin", "--prune",
-                  "+refs/heads/*:refs/heads/*",
-                  "+refs/tags/*:refs/tags/*"], cwd=bare_path)
+        fetch_cmd = ["fetch", "origin", "--prune",
+                     "+refs/heads/*:refs/heads/*",
+                     "+refs/tags/*:refs/tags/*"]
+        if trim_since:
+            fetch_cmd.extend(["--shallow-since", trim_since])
+        _run_git(fetch_cmd, cwd=bare_path)
     else:
         clone_url = bb.get_repo_clone_url(repo, protocol="ssh")
         if not clone_url:
@@ -295,7 +299,11 @@ def _migrate_single_repo(config, bb, gh, state, project_key, repo_slug, repo_nam
             clone_url = f"{config.bb_ssh_url}/{project_key.lower()}/{repo_slug}.git"
 
         logger.info("Cloning %s -> %s", clone_url, bare_path)
-        _run_git(["clone", "--bare", clone_url, bare_path])
+        clone_cmd = ["clone", "--bare", clone_url, bare_path]
+        if trim_since:
+            clone_cmd.insert(2, f"--shallow-since={trim_since}")
+            logger.info("Trimming history: keeping commits since %s", trim_since)
+        _run_git(clone_cmd)
 
     # 3. Clean hidden refs
     _clean_hidden_refs(bare_path)

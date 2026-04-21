@@ -78,6 +78,14 @@ repo_mapping:
       #   - archived-spike
     # Projects not listed here use github.org and the global name_template
 
+# Optional: trim history for specific large repos.
+# Only commits within the retention period are migrated/synced.
+# HEAD commit hashes are preserved (uses git shallow clones).
+# Format: PROJECT/slug: "Ny" (years), "Nm" (months), or "Nd" (days)
+# trim_history:
+#   UPSTREAM/linux: "2y"
+#   UPSTREAM/git: "1y"
+
 # Optional: auto-convert large files to Git LFS before pushing to GitHub.
 # GitHub rejects files >100MB. This rewrites history to store them as LFS objects.
 lfs:
