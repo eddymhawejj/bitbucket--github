@@ -338,7 +338,18 @@ def _migrate_single_repo(config, bb, gh, state, project_key, repo_slug, repo_nam
         pass  # Remote didn't exist
 
     _run_git(["remote", "add", "github", gh_clone_url], cwd=bare_path)
-    _run_git(["push", "--mirror", "github"], cwd=bare_path)
+
+    if trim_since:
+        # Shallow repos can't use --mirror (remote rejects missing parent objects).
+        # Push branches and tags separately.
+        _run_git(["push", "github", "--all", "--force"], cwd=bare_path)
+        try:
+            _run_git(["push", "github", "--tags", "--force"], cwd=bare_path)
+        except subprocess.CalledProcessError:
+            logger.warning("Tag push failed for %s/%s (some tags may reference pruned history)", gh_org, gh_repo_name)
+            warnings.append("Some tags could not be pushed (reference pruned history)")
+    else:
+        _run_git(["push", "--mirror", "github"], cwd=bare_path)
 
     # Push LFS objects separately — only if LFS actually converted files
     if has_lfs:

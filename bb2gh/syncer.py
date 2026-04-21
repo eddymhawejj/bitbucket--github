@@ -173,7 +173,14 @@ class Syncer:
                 logger.warning("LFS migration failed for %s/%s, skipping LFS", project_key, repo_slug)
 
         # Push to GitHub
-        _run_git(["push", "github", "--mirror"], cwd=bare_path)
+        if trim_since:
+            _run_git(["push", "github", "--all", "--force"], cwd=bare_path)
+            try:
+                _run_git(["push", "github", "--tags", "--force"], cwd=bare_path)
+            except subprocess.CalledProcessError:
+                logger.warning("Tag push failed for %s/%s", project_key, repo_slug)
+        else:
+            _run_git(["push", "github", "--mirror"], cwd=bare_path)
 
         if has_lfs:
             try:
