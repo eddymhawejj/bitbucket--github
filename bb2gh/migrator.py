@@ -341,13 +341,29 @@ def _migrate_single_repo(config, bb, gh, state, project_key, repo_slug, repo_nam
 
     if trim_since:
         # Shallow repos can't use --mirror (remote rejects missing parent objects).
-        # Push branches and tags separately.
-        _run_git(["push", "github", "--all", "--force"], cwd=bare_path)
-        try:
-            _run_git(["push", "github", "--tags", "--force"], cwd=bare_path)
-        except subprocess.CalledProcessError:
-            logger.warning("Tag push failed for %s/%s (some tags may reference pruned history)", gh_org, gh_repo_name)
-            warnings.append("Some tags could not be pushed (reference pruned history)")
+        # Push branches individually to keep pack sizes under GitHub's 2GB limit.
+        branches = _run_git(["for-each-ref", "--format=%(refname:short)", "refs/heads/"],
+                            cwd=bare_path, quiet=True)
+        for branch in branches.strip().splitlines():
+            branch = branch.strip()
+            if not branch:
+                continue
+            try:
+                _run_git(["push", "github", f"{branch}:{branch}", "--force"], cwd=bare_path)
+            except subprocess.CalledProcessError:
+                logger.warning("Failed to push branch %s for %s/%s", branch, project_key, repo_slug)
+        # Push tags individually too
+        tags = _run_git(["for-each-ref", "--format=%(refname:short)", "refs/tags/"],
+                        cwd=bare_path, quiet=True)
+        for tag in tags.strip().splitlines():
+            tag = tag.strip()
+            if not tag:
+                continue
+            try:
+                _run_git(["push", "github", f"refs/tags/{tag}:refs/tags/{tag}", "--force"],
+                         cwd=bare_path, quiet=True)
+            except subprocess.CalledProcessError:
+                pass  # Tags referencing pruned history will fail silently
     else:
         _run_git(["push", "--mirror", "github"], cwd=bare_path)
 

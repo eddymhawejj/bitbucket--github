@@ -174,11 +174,16 @@ class Syncer:
 
         # Push to GitHub
         if trim_since:
-            _run_git(["push", "github", "--all", "--force"], cwd=bare_path)
-            try:
-                _run_git(["push", "github", "--tags", "--force"], cwd=bare_path)
-            except subprocess.CalledProcessError:
-                logger.warning("Tag push failed for %s/%s", project_key, repo_slug)
+            branches = _run_git(["for-each-ref", "--format=%(refname:short)", "refs/heads/"],
+                                cwd=bare_path, quiet=True)
+            for branch in branches.strip().splitlines():
+                branch = branch.strip()
+                if not branch:
+                    continue
+                try:
+                    _run_git(["push", "github", f"{branch}:{branch}", "--force"], cwd=bare_path)
+                except subprocess.CalledProcessError:
+                    logger.warning("Failed to push branch %s for %s/%s", branch, project_key, repo_slug)
         else:
             _run_git(["push", "github", "--mirror"], cwd=bare_path)
 
