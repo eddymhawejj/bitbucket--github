@@ -34,6 +34,7 @@ def mock_config(tmp_path):
     config.gh_ssh_host = ""
     config.gh_ssh_url = ""
     config.migrate_delay = 0
+    config.get_trim_since = MagicMock(return_value=None)
     return config
 
 

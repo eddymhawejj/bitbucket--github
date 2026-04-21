@@ -90,6 +90,90 @@ def _has_large_blobs(bare_path, threshold):
     return len(line.strip()) > 0
 
 
+def _trim_history(bare_path, since_date):
+    """Trim repo history using git replace --graft + filter-branch.
+
+    Finds the oldest commit after since_date on each branch, grafts it
+    as a root commit (no parents), then rewrites history permanently.
+    This creates a clean, pushable history without shallow boundaries.
+    Note: commit hashes will change.
+    """
+    import shutil
+    import tempfile
+
+    logger.info("Trimming history (keeping since %s) in %s", since_date, os.path.basename(bare_path))
+    tmp_dir = tempfile.mkdtemp(suffix=".trim")
+    try:
+        work_path = os.path.join(tmp_dir, "work")
+        env_no_lfs = {"GIT_LFS_SKIP_SMUDGE": "1"}
+        cmd = ["git", "clone", bare_path, work_path]
+        subprocess.run(cmd, capture_output=True, text=True, check=True,
+                       env={**os.environ, **env_no_lfs})
+
+        # Create local branches for all remotes
+        branches_output = _run_git(["branch", "-r"], cwd=work_path)
+        for line in branches_output.splitlines():
+            branch = line.strip()
+            if "HEAD" in branch or not branch.startswith("origin/"):
+                continue
+            local_name = branch.replace("origin/", "", 1)
+            try:
+                _run_git(["branch", "--track", local_name, branch],
+                         cwd=work_path, quiet=True)
+            except subprocess.CalledProcessError:
+                pass
+
+        # Find graft points: oldest commit after cutoff per branch
+        graft_points = set()
+        local_branches = _run_git(
+            ["for-each-ref", "--format=%(refname)", "refs/heads/"],
+            cwd=work_path, quiet=True,
+        )
+        for ref in local_branches.strip().splitlines():
+            try:
+                commits = _run_git(
+                    ["rev-list", f"--after={since_date}", "--reverse", ref],
+                    cwd=work_path, quiet=True,
+                )
+            except subprocess.CalledProcessError:
+                continue
+            lines = commits.strip().splitlines()
+            if lines:
+                graft_points.add(lines[0])
+
+        if not graft_points:
+            logger.info("No commits to trim in %s", os.path.basename(bare_path))
+            return
+
+        # Graft each point as a root commit
+        for sha in graft_points:
+            _run_git(["replace", "--graft", sha], cwd=work_path)
+
+        # Rewrite history permanently
+        env_filter = {**os.environ, "FILTER_BRANCH_SQUELCH_WARNING": "1"}
+        subprocess.run(
+            ["git", "filter-branch", "--tag-name-filter", "cat", "--", "--all"],
+            cwd=work_path, capture_output=True, text=True, check=True,
+            env=env_filter,
+        )
+
+        # Fetch rewritten refs back into the bare repo
+        _run_git(["remote", "add", "trim-source", work_path], cwd=bare_path)
+        _run_git(["fetch", "trim-source", "--force",
+                  "+refs/heads/*:refs/heads/*",
+                  "+refs/tags/*:refs/tags/*"], cwd=bare_path)
+        _run_git(["remote", "remove", "trim-source"], cwd=bare_path)
+
+        # Clean up old objects
+        _run_git(["reflog", "expire", "--expire=now", "--all"], cwd=bare_path, quiet=True)
+        _run_git(["gc", "--prune=now"], cwd=bare_path, quiet=True)
+
+        logger.info("Trimmed history in %s: %d graft points", os.path.basename(bare_path), len(graft_points))
+
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
 def _migrate_lfs(bare_path, threshold, timeout=None):
     """Convert files above threshold to Git LFS in all branches.
 
@@ -286,12 +370,9 @@ def _migrate_single_repo(config, bb, gh, state, project_key, repo_slug, repo_nam
     if os.path.exists(bare_path):
         # Already cloned, fetch latest
         logger.info("Bare clone exists, fetching latest: %s", bare_path)
-        fetch_cmd = ["fetch", "origin", "--prune",
-                     "+refs/heads/*:refs/heads/*",
-                     "+refs/tags/*:refs/tags/*"]
-        if trim_since:
-            fetch_cmd.extend(["--shallow-since", trim_since])
-        _run_git(fetch_cmd, cwd=bare_path)
+        _run_git(["fetch", "origin", "--prune",
+                  "+refs/heads/*:refs/heads/*",
+                  "+refs/tags/*:refs/tags/*"], cwd=bare_path)
     else:
         clone_url = bb.get_repo_clone_url(repo, protocol="ssh")
         if not clone_url:
@@ -299,11 +380,7 @@ def _migrate_single_repo(config, bb, gh, state, project_key, repo_slug, repo_nam
             clone_url = f"{config.bb_ssh_url}/{project_key.lower()}/{repo_slug}.git"
 
         logger.info("Cloning %s -> %s", clone_url, bare_path)
-        clone_cmd = ["clone", "--bare", clone_url, bare_path]
-        if trim_since:
-            clone_cmd.insert(2, f"--shallow-since={trim_since}")
-            logger.info("Trimming history: keeping commits since %s", trim_since)
-        _run_git(clone_cmd)
+        _run_git(["clone", "--bare", clone_url, bare_path])
 
     # 3. Clean hidden refs
     _clean_hidden_refs(bare_path)
@@ -311,10 +388,13 @@ def _migrate_single_repo(config, bb, gh, state, project_key, repo_slug, repo_nam
     # Track migration details
     warnings = []
 
-    # 4. Remap submodule URLs from Bitbucket to GitHub
+    # 4. Trim history if configured (must run before submodule remap)
+    if trim_since:
+        _trim_history(bare_path, trim_since)
+
+    # 5. Remap submodule URLs from Bitbucket to GitHub
     submodules_remapped = remap_submodules_in_bare_repo(bare_path, config)
     has_submodules = submodules_remapped > 0
-    # Check if repo has .gitmodules but remap returned 0 (skipped due to unresolvable URLs)
     try:
         _run_git(["show", "HEAD:.gitmodules"], cwd=bare_path, quiet=True)
         has_submodules = True
@@ -323,49 +403,21 @@ def _migrate_single_repo(config, bb, gh, state, project_key, repo_slug, repo_nam
     except subprocess.CalledProcessError:
         pass
 
-    # 5. Migrate large files to LFS if enabled
+    # 6. Migrate large files to LFS if enabled
     has_lfs = False
     if config.lfs_enabled:
         has_lfs = _migrate_lfs(bare_path, config.lfs_threshold)
 
-    # 6. Add GitHub remote and push
+    # 7. Add GitHub remote and push
     gh_clone_url = gh.get_clone_url(gh_repo_name, org_name=gh_org, ssh_url=config.gh_ssh_url or None)
 
-    # Remove existing github remote if present, then add
     try:
         _run_git(["remote", "remove", "github"], cwd=bare_path, quiet=True)
     except subprocess.CalledProcessError:
-        pass  # Remote didn't exist
+        pass
 
     _run_git(["remote", "add", "github", gh_clone_url], cwd=bare_path)
-
-    if trim_since:
-        # Shallow repos can't use --mirror (remote rejects missing parent objects).
-        # Push branches individually to keep pack sizes under GitHub's 2GB limit.
-        branches = _run_git(["for-each-ref", "--format=%(refname:short)", "refs/heads/"],
-                            cwd=bare_path, quiet=True)
-        for branch in branches.strip().splitlines():
-            branch = branch.strip()
-            if not branch:
-                continue
-            try:
-                _run_git(["push", "github", f"{branch}:{branch}", "--force"], cwd=bare_path)
-            except subprocess.CalledProcessError:
-                logger.warning("Failed to push branch %s for %s/%s", branch, project_key, repo_slug)
-        # Push tags individually too
-        tags = _run_git(["for-each-ref", "--format=%(refname:short)", "refs/tags/"],
-                        cwd=bare_path, quiet=True)
-        for tag in tags.strip().splitlines():
-            tag = tag.strip()
-            if not tag:
-                continue
-            try:
-                _run_git(["push", "github", f"refs/tags/{tag}:refs/tags/{tag}", "--force"],
-                         cwd=bare_path, quiet=True)
-            except subprocess.CalledProcessError:
-                pass  # Tags referencing pruned history will fail silently
-    else:
-        _run_git(["push", "--mirror", "github"], cwd=bare_path)
+    _run_git(["push", "--mirror", "github"], cwd=bare_path)
 
     # Push LFS objects separately — only if LFS actually converted files
     if has_lfs:

@@ -6,7 +6,7 @@ import signal
 import subprocess
 import time
 
-from .migrator import _migrate_lfs, _has_large_blobs
+from .migrator import _migrate_lfs, _has_large_blobs, _trim_history
 from .state import State
 from .submodules import remap_submodules_in_bare_repo
 
@@ -128,13 +128,9 @@ class Syncer:
         target_label = f"{gh_org}/{gh_repo_name}" if gh_org else "github"
 
         # Fetch from Bitbucket (origin)
-        fetch_cmd = ["fetch", "origin", "--prune",
-                     "+refs/heads/*:refs/heads/*",
-                     "+refs/tags/*:refs/tags/*"]
-        trim_since = self.config.get_trim_since(project_key, repo_slug)
-        if trim_since:
-            fetch_cmd.extend(["--shallow-since", trim_since])
-        _run_git(fetch_cmd, cwd=bare_path)
+        _run_git(["fetch", "origin", "--prune",
+                  "+refs/heads/*:refs/heads/*",
+                  "+refs/tags/*:refs/tags/*"], cwd=bare_path)
 
         # Compare Bitbucket's refs (post-fetch) against last sync snapshot
         try:
@@ -158,11 +154,15 @@ class Syncer:
         # Clean hidden refs before pushing
         _clean_hidden_refs(bare_path)
 
+        # Trim history if configured
+        trim_since = self.config.get_trim_since(project_key, repo_slug)
+        if trim_since:
+            _trim_history(bare_path, trim_since)
+
         # Remap submodule URLs from Bitbucket to GitHub
         remap_submodules_in_bare_repo(bare_path, self.config)
 
         # LFS: only run if repo actually has large blobs (fast pre-check)
-        # Timeout after 60s to avoid blocking the sync cycle
         has_lfs = False
         if self.config.lfs_enabled and _has_large_blobs(bare_path, self.config.lfs_threshold):
             try:
@@ -173,19 +173,7 @@ class Syncer:
                 logger.warning("LFS migration failed for %s/%s, skipping LFS", project_key, repo_slug)
 
         # Push to GitHub
-        if trim_since:
-            branches = _run_git(["for-each-ref", "--format=%(refname:short)", "refs/heads/"],
-                                cwd=bare_path, quiet=True)
-            for branch in branches.strip().splitlines():
-                branch = branch.strip()
-                if not branch:
-                    continue
-                try:
-                    _run_git(["push", "github", f"{branch}:{branch}", "--force"], cwd=bare_path)
-                except subprocess.CalledProcessError:
-                    logger.warning("Failed to push branch %s for %s/%s", branch, project_key, repo_slug)
-        else:
-            _run_git(["push", "github", "--mirror"], cwd=bare_path)
+        _run_git(["push", "github", "--mirror"], cwd=bare_path)
 
         if has_lfs:
             try:
