@@ -49,7 +49,7 @@ class Config:
         self.lfs_enabled = lfs.get("enabled", False)
         self.lfs_threshold = lfs.get("threshold", "100mb")
 
-        # History trimming (repo-specific)
+        # History trimming (repo-specific) — rewrites history, changes commit hashes
         self.trim_history = raw.get("trim_history", {})
 
         # Repository mapping (Bitbucket project/repo -> GitHub org/repo)
