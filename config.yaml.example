@@ -86,6 +86,12 @@ repo_mapping:
 #   UPSTREAM/linux: "2y"
 #   UPSTREAM/git: "1y"
 
+# Optional: repos too large for --mirror push (>2GB pack).
+# These are pushed branch-by-branch instead.
+# push_by_branch:
+#   - UPSTREAM/linux
+#   - BGAN_UT_RM/bganut-linux
+
 # Optional: auto-convert large files to Git LFS before pushing to GitHub.
 # GitHub rejects files >100MB. This rewrites history to store them as LFS objects.
 lfs:

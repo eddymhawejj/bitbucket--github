@@ -453,14 +453,19 @@ def _migrate_single_repo(config, bb, gh, state, project_key, repo_slug, repo_nam
 
     _run_git(["remote", "add", "github", gh_clone_url], cwd=bare_path)
 
-    try:
-        _run_git(["push", "--mirror", "github"], cwd=bare_path)
-    except subprocess.CalledProcessError as e:
-        if "pack exceeds maximum allowed size" in (e.stderr or ""):
-            logger.warning("Pack too large for --mirror, pushing branch-by-branch for %s/%s", project_key, repo_slug)
-            _push_branch_by_branch(bare_path, project_key, repo_slug)
-        else:
-            raise
+    repo_key = f"{project_key}/{repo_slug}"
+    if repo_key in config.push_by_branch:
+        logger.info("Pushing branch-by-branch for %s (configured)", repo_key)
+        _push_branch_by_branch(bare_path, project_key, repo_slug)
+    else:
+        try:
+            _run_git(["push", "--mirror", "github"], cwd=bare_path)
+        except subprocess.CalledProcessError as e:
+            if "pack exceeds maximum allowed size" in (e.stderr or ""):
+                logger.warning("Pack too large for --mirror, pushing branch-by-branch for %s/%s", project_key, repo_slug)
+                _push_branch_by_branch(bare_path, project_key, repo_slug)
+            else:
+                raise
 
     # Push LFS objects separately — only if LFS actually converted files
     if has_lfs:

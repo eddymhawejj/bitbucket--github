@@ -52,6 +52,9 @@ class Config:
         # History trimming (repo-specific) — rewrites history, changes commit hashes
         self.trim_history = raw.get("trim_history", {})
 
+        # Repos that need branch-by-branch push (too large for --mirror's 2GB pack limit)
+        self.push_by_branch = set(raw.get("push_by_branch", []))
+
         # Repository mapping (Bitbucket project/repo -> GitHub org/repo)
         rm = raw.get("repo_mapping", {})
         self._repo_mapping = rm
