@@ -368,16 +368,19 @@ def _push_branch_by_branch(bare_path, project_key, repo_slug, delay=2):
 
     tags = _run_git(["for-each-ref", "--format=%(refname:short)", "refs/tags/"],
                     cwd=bare_path, quiet=True)
-    for tag in tags.strip().splitlines():
-        tag = tag.strip()
-        if not tag:
-            continue
+    tag_list = [t.strip() for t in tags.strip().splitlines() if t.strip()]
+    if tag_list:
         try:
-            _run_git(["push", "github", f"refs/tags/{tag}:refs/tags/{tag}", "--force"],
-                     cwd=bare_path, quiet=True)
+            # Push all tags at once — they're lightweight (no large packs)
+            _run_git(["push", "github", "--tags", "--force"], cwd=bare_path)
         except subprocess.CalledProcessError:
-            pass
-        time.sleep(delay)
+            # Fallback: push individually if batch fails
+            for tag in tag_list:
+                try:
+                    _run_git(["push", "github", f"refs/tags/{tag}:refs/tags/{tag}", "--force"],
+                             cwd=bare_path, quiet=True)
+                except subprocess.CalledProcessError:
+                    pass
 
     logger.info("Branch-by-branch push: %d pushed, %d failed for %s/%s",
                 pushed, failed, project_key, repo_slug)
