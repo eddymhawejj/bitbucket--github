@@ -6,7 +6,7 @@ import signal
 import subprocess
 import time
 
-from .migrator import _migrate_lfs, _has_large_blobs, _trim_history
+from .migrator import _migrate_lfs, _has_large_blobs, _trim_history, _push_branch_by_branch
 from .state import State
 from .submodules import remap_submodules_in_bare_repo
 
@@ -173,7 +173,11 @@ class Syncer:
                 logger.warning("LFS migration failed for %s/%s, skipping LFS", project_key, repo_slug)
 
         # Push to GitHub
-        _run_git(["push", "github", "--mirror"], cwd=bare_path)
+        repo_key = f"{project_key}/{repo_slug}"
+        if repo_key in self.config.push_by_branch:
+            _push_branch_by_branch(bare_path, project_key, repo_slug, delay=self.config.migrate_delay)
+        else:
+            _run_git(["push", "github", "--mirror"], cwd=bare_path)
 
         if has_lfs:
             try:

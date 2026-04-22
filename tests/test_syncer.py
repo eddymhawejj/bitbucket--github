@@ -19,6 +19,7 @@ def mock_config(tmp_path):
     config.migrate_delay = 0
     config.sync_exclude_projects = set()
     config.get_trim_since = MagicMock(return_value=None)
+    config.push_by_branch = set()
     return config
 
 
