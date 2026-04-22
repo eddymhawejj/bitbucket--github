@@ -348,7 +348,7 @@ def migrate_repos(config, only_repos=None):
     return total_migrated, total_skipped, total_failed
 
 
-def _push_branch_by_branch(bare_path, project_key, repo_slug):
+def _push_branch_by_branch(bare_path, project_key, repo_slug, delay=2):
     """Push branches and tags individually when --mirror pack exceeds 2GB."""
     branches = _run_git(["for-each-ref", "--format=%(refname:short)", "refs/heads/"],
                         cwd=bare_path, quiet=True)
@@ -364,6 +364,7 @@ def _push_branch_by_branch(bare_path, project_key, repo_slug):
         except subprocess.CalledProcessError:
             logger.warning("Failed to push branch %s for %s/%s", branch, project_key, repo_slug)
             failed += 1
+        time.sleep(delay)
 
     tags = _run_git(["for-each-ref", "--format=%(refname:short)", "refs/tags/"],
                     cwd=bare_path, quiet=True)
@@ -376,6 +377,7 @@ def _push_branch_by_branch(bare_path, project_key, repo_slug):
                      cwd=bare_path, quiet=True)
         except subprocess.CalledProcessError:
             pass
+        time.sleep(delay)
 
     logger.info("Branch-by-branch push: %d pushed, %d failed for %s/%s",
                 pushed, failed, project_key, repo_slug)
@@ -456,14 +458,14 @@ def _migrate_single_repo(config, bb, gh, state, project_key, repo_slug, repo_nam
     repo_key = f"{project_key}/{repo_slug}"
     if repo_key in config.push_by_branch:
         logger.info("Pushing branch-by-branch for %s (configured)", repo_key)
-        _push_branch_by_branch(bare_path, project_key, repo_slug)
+        _push_branch_by_branch(bare_path, project_key, repo_slug, delay=config.migrate_delay)
     else:
         try:
             _run_git(["push", "--mirror", "github"], cwd=bare_path)
         except subprocess.CalledProcessError as e:
             if "pack exceeds maximum allowed size" in (e.stderr or ""):
                 logger.warning("Pack too large for --mirror, pushing branch-by-branch for %s/%s", project_key, repo_slug)
-                _push_branch_by_branch(bare_path, project_key, repo_slug)
+                _push_branch_by_branch(bare_path, project_key, repo_slug, delay=config.migrate_delay)
             else:
                 raise
 
