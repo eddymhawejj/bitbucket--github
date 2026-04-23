@@ -64,14 +64,15 @@ class Config:
     def resolve_target(self, project_key, repo_slug):
         """Resolve a Bitbucket project/repo to a GitHub org and repo name.
 
-        Lookup order:
-        1. Explicit per-repo override in repo_mapping.projects.<KEY>.repos.<slug>.github_name
-        2. Per-project name_template override in repo_mapping.projects.<KEY>.name_template
-        3. Global name_template from repo_mapping.name_template (default: "{slug}")
+        Lookup order for org:
+        1. Per-repo github_org in repo_mapping.projects.<KEY>.repos.<slug>.github_org
+        2. Per-project github_org in repo_mapping.projects.<KEY>.github_org
+        3. Global github.org
 
-        For the org:
-        1. Per-project github_org in repo_mapping.projects.<KEY>.github_org
-        2. Global github.org
+        Lookup order for repo name:
+        1. Per-repo github_name in repo_mapping.projects.<KEY>.repos.<slug>.github_name
+        2. Per-project name_template
+        3. Global name_template (default: "{slug}")
 
         Returns:
             (github_org, github_repo_name) tuple
@@ -81,10 +82,11 @@ class Config:
         # Resolve org
         gh_org = project_conf.get("github_org", self.gh_org)
 
-        # Resolve repo name: check explicit per-repo override first
+        # Resolve repo name and org: check explicit per-repo override first
         repos_conf = project_conf.get("repos", {})
         if repo_slug in repos_conf:
             repo_conf = repos_conf[repo_slug]
+            gh_org = repo_conf.get("github_org", gh_org)
             gh_repo = repo_conf.get("github_name", repo_slug)
         else:
             # Use per-project template, falling back to global template
