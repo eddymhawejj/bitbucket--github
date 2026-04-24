@@ -102,6 +102,30 @@ class GithubClient:
         repo.edit(default_branch=branch)
         logger.info("Set default branch for %s to %s", repo_name, branch)
 
+    def get_default_branch(self, repo_name, org_name=None):
+        """Get the default branch name for a repository."""
+        repo = self.get_repo(repo_name, org_name)
+        return repo.default_branch
+
+    def create_branch(self, repo_name, branch_name, from_branch=None, org_name=None):
+        """Create a branch on a GitHub repository.
+
+        If from_branch is None, branches from the default branch.
+        Returns the branch name. If it already exists, returns it.
+        """
+        repo = self.get_repo(repo_name, org_name)
+        source = from_branch or repo.default_branch
+        sha = repo.get_branch(source).commit.sha
+        try:
+            repo.create_git_ref(ref=f"refs/heads/{branch_name}", sha=sha)
+            logger.info("Created branch %s on %s from %s", branch_name, repo_name, source)
+        except GithubException as e:
+            if e.status == 422:
+                logger.info("Branch %s already exists on %s", branch_name, repo_name)
+            else:
+                raise
+        return branch_name
+
     def get_clone_url(self, repo_name, org_name=None, ssh_url=None):
         """Get the clone URL for a repo.
 

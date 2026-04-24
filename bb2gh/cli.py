@@ -381,5 +381,54 @@ def report(ctx, fmt, output_file):
         click.echo(output)
 
 
+@cli.command("prepare-jenkins")
+@click.option("--repo", multiple=True, help="Prepare specific repos only (PROJECT/SLUG).")
+@click.option("--branch", default=None, help="Source branch (default: repo default branch).")
+@click.option("--migration-branch", default="ci/github-actions-migration",
+              help="Branch name to create on GitHub for the migration.")
+@click.option("--dry-run", is_flag=True, help="Show what would be done without making changes.")
+@click.pass_context
+def prepare_jenkins(ctx, repo, branch, migration_branch, dry_run):
+    """Prepare workspaces for Jenkins-to-GitHub-Actions conversion.
+
+    Creates clean workspace directories containing only Jenkinsfiles
+    and their dependencies, with a new migration branch on GitHub.
+    """
+    config = ctx.obj["config"]
+    from .jenkins_prep import prepare_jenkins_workspaces
+    only_repos = set(repo) if repo else None
+    prepared, skipped, failed = prepare_jenkins_workspaces(
+        config, only_repos=only_repos, branch=branch,
+        migration_branch_name=migration_branch, dry_run=dry_run,
+    )
+    click.echo(f"\nJenkins prep: {prepared} prepared, {skipped} skipped, {failed} failed")
+    if failed > 0:
+        sys.exit(1)
+
+
+@cli.command("jenkins-manifest")
+@click.option("--repo", multiple=True, help="Include specific repos only (PROJECT/SLUG).")
+@click.option("--branch", default=None, help="Source branch (default: repo default branch).")
+@click.option("--migration-branch", default="ci/github-actions-migration",
+              help="Migration branch name to include in manifest.")
+@click.option("--output", default="jenkins-manifest.yaml", help="Output manifest file path.")
+@click.pass_context
+def jenkins_manifest(ctx, repo, branch, migration_branch, output):
+    """Generate a manifest of repos with Jenkinsfiles for remote AI agents.
+
+    Scans migrated repos for Jenkinsfiles and writes a YAML manifest
+    listing clone URLs, branch names, and file paths. Transfer this
+    file to the machine where the AI agent runs.
+    """
+    config = ctx.obj["config"]
+    from .jenkins_prep import generate_manifest
+    only_repos = set(repo) if repo else None
+    found = generate_manifest(
+        config, only_repos=only_repos, branch=branch,
+        migration_branch_name=migration_branch, output_path=output,
+    )
+    click.echo(f"\nManifest written to {output}: {found} repos with Jenkinsfiles")
+
+
 if __name__ == "__main__":
     cli()

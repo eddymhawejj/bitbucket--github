@@ -138,3 +138,24 @@ class State:
         key = f"{project_key}/{repo_slug}"
         repo_state = self._data["repos"].get(key, {})
         return str(bb_pr_id) in repo_state.get("pr_mappings", {})
+
+    def mark_jenkins_prepared(self, project_key, repo_slug, migration_branch,
+                              workspace_path, jenkins_files):
+        """Record that a repo's Jenkins workspace has been prepared."""
+        key = f"{project_key}/{repo_slug}"
+        if key not in self._data["repos"]:
+            return
+        self._data["repos"][key]["jenkins_prep"] = {
+            "status": "prepared",
+            "prepared_at": self._now(),
+            "migration_branch": migration_branch,
+            "workspace_path": workspace_path,
+            "jenkins_files": jenkins_files,
+        }
+        self._save()
+
+    def is_jenkins_prepared(self, project_key, repo_slug):
+        """Check if a repo's Jenkins workspace has been prepared."""
+        key = f"{project_key}/{repo_slug}"
+        entry = self._data["repos"].get(key, {})
+        return entry.get("jenkins_prep", {}).get("status") == "prepared"
