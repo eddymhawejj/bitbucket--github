@@ -124,7 +124,11 @@ def create_workspace(config, state, gh, project_key, repo_slug,
         ref = f"refs/heads/{source_branch}"
         all_paths = _get_all_tree_paths(bare_path, ref=ref)
     except subprocess.CalledProcessError:
-        all_paths = _get_all_tree_paths(bare_path)
+        try:
+            all_paths = _get_all_tree_paths(bare_path)
+        except subprocess.CalledProcessError:
+            logger.warning("No branches found in %s (empty repo?), skipping", repo_key)
+            return None
 
     jenkins_files, dep_files = find_jenkins_files(all_paths)
 
