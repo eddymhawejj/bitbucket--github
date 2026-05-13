@@ -40,6 +40,10 @@ sync:
   migrate_delay_seconds: 2
   # Max time (seconds) for LFS migration during sync (default: 60)
   sync_lfs_timeout_seconds: 60
+  # Branches on GitHub to protect from sync deletion (e.g., CI migration branches)
+  # When set, sync uses --all --force instead of --mirror to preserve these branches
+  # protected_branches:
+  #   - ci/github-actions-migration
   # Projects to exclude from continuous sync (still migrated, just not synced)
   # exclude_projects:
   #   - UPSTREAM
@@ -91,6 +95,11 @@ repo_mapping:
 # push_by_branch:
 #   - UPSTREAM/linux
 #   - BGAN_UT_RM/bganut-linux
+
+# Optional: map old Bitbucket project keys to current keys.
+# Used for .gitmodules remapping when URLs reference renamed projects.
+# project_aliases:
+#   OLD_PROJECT_KEY: CURRENT_PROJECT_KEY
 
 # Optional: auto-convert large files to Git LFS before pushing to GitHub.
 # GitHub rejects files >100MB. This rewrites history to store them as LFS objects.

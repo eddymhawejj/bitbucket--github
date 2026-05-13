@@ -124,7 +124,12 @@ def remap_submodule_urls(content, config):
 
         project_key_raw, slug = parsed
         resolved = None
-        for pk in [project_key_raw.upper(), project_key_raw]:
+        # Try the raw key and its uppercase, plus any alias
+        candidates = [project_key_raw.upper(), project_key_raw]
+        alias = config.project_aliases.get(project_key_raw.upper())
+        if alias:
+            candidates.insert(0, alias)
+        for pk in candidates:
             if config.bb_projects and pk not in config.bb_projects:
                 continue
             if not config.should_migrate_repo(pk, slug):

@@ -40,6 +40,7 @@ class Config:
         self.sync_exclude_projects = set(
             p.upper() for p in sync.get("exclude_projects", [])
         )
+        self.sync_protected_branches = sync.get("protected_branches", [])
 
         # User mapping (Bitbucket username -> GitHub username)
         self.user_mapping = raw.get("user_mapping", {})
@@ -54,6 +55,11 @@ class Config:
 
         # Repos that need branch-by-branch push (too large for --mirror's 2GB pack limit)
         self.push_by_branch = set(raw.get("push_by_branch", []))
+
+        # Project key aliases (old_key -> current_key) for .gitmodules remapping
+        self.project_aliases = {}
+        for old, new in raw.get("project_aliases", {}).items():
+            self.project_aliases[old.upper()] = new.upper()
 
         # Repository mapping (Bitbucket project/repo -> GitHub org/repo)
         rm = raw.get("repo_mapping", {})

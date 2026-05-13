@@ -113,6 +113,39 @@ class Syncer:
             synced, skipped, failed,
         )
 
+    def _prune_unprotected_branches(self, bare_path, project_key, repo_slug):
+        """Delete remote branches on GitHub that don't exist locally, except protected ones."""
+        protected = set(self.config.sync_protected_branches)
+
+        # Get local branches (from Bitbucket)
+        local_output = _run_git(
+            ["for-each-ref", "--format=%(refname:short)", "refs/heads/"],
+            cwd=bare_path, quiet=True,
+        )
+        local_branches = set(l.strip() for l in local_output.splitlines() if l.strip())
+
+        # Get remote branches on GitHub
+        try:
+            remote_output = _run_git(
+                ["ls-remote", "--heads", "github"],
+                cwd=bare_path, quiet=True,
+            )
+        except subprocess.CalledProcessError:
+            return
+
+        for line in remote_output.splitlines():
+            parts = line.split()
+            if len(parts) < 2:
+                continue
+            ref = parts[1].replace("refs/heads/", "")
+            if ref in local_branches or ref in protected:
+                continue
+            try:
+                _run_git(["push", "github", "--delete", ref], cwd=bare_path, quiet=True)
+                logger.debug("Deleted remote branch %s (not in source, not protected)", ref)
+            except subprocess.CalledProcessError:
+                pass
+
     def _sync_repo(self, project_key, repo_slug):
         """Sync a single repo: fetch from Bitbucket, push to GitHub only if changed."""
         bare_path = os.path.join(
@@ -176,6 +209,12 @@ class Syncer:
         repo_key = f"{project_key}/{repo_slug}"
         if repo_key in self.config.push_by_branch:
             _push_branch_by_branch(bare_path, project_key, repo_slug, delay=self.config.migrate_delay)
+        elif self.config.sync_protected_branches:
+            # Can't use --mirror (it deletes branches not in source).
+            # Push all branches + tags, then prune only unprotected branches.
+            _run_git(["push", "github", "--all", "--force"], cwd=bare_path)
+            _run_git(["push", "github", "--tags", "--force"], cwd=bare_path)
+            self._prune_unprotected_branches(bare_path, project_key, repo_slug)
         else:
             _run_git(["push", "github", "--mirror"], cwd=bare_path)
 

@@ -19,6 +19,7 @@ def mock_config():
     config.bb_verify_ssl = True
     config.gh_ssh_host = "gatehousesatcom.ghe.com"
     config.gh_ssh_url = "ssh://gatehousesatcom@gatehousesatcom.ghe.com"
+    config.project_aliases = {}
     config.should_migrate_repo = MagicMock(return_value=True)
     config.resolve_target = MagicMock(
         side_effect=lambda proj, slug: ("networks-ngsp", slug)
