@@ -4,17 +4,16 @@ import logging
 import os
 import re
 import subprocess
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
-_REMAP_ENV = {
+_REMAP_IDENTITY = {
     "GIT_AUTHOR_NAME": "bb2gh",
     "GIT_AUTHOR_EMAIL": "bb2gh@migration",
-    "GIT_AUTHOR_DATE": "2000-01-01T00:00:00+00:00",
     "GIT_COMMITTER_NAME": "bb2gh",
     "GIT_COMMITTER_EMAIL": "bb2gh@migration",
-    "GIT_COMMITTER_DATE": "2000-01-01T00:00:00+00:00",
 }
 
 _COMMIT_MSG = "bb2gh: remap submodule URLs for GitHub migration"
@@ -213,12 +212,15 @@ def remap_submodules_in_bare_repo(bare_repo_path, config, alias_resolver=None):
     if not output.strip():
         return 0
 
+    # Fixed timestamp for this run — deterministic within a cycle but a real date
+    run_timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+
     # Shared cache for API results across all branches in this repo
     alias_cache = {}
 
     remapped = 0
     for ref in output.strip().splitlines():
-        if _remap_branch(bare_repo_path, ref, config, alias_resolver, alias_cache):
+        if _remap_branch(bare_repo_path, ref, config, alias_resolver, alias_cache, run_timestamp):
             remapped += 1
 
     if remapped:
@@ -230,7 +232,7 @@ def remap_submodules_in_bare_repo(bare_repo_path, config, alias_resolver=None):
     return remapped
 
 
-def _remap_branch(bare_repo_path, ref, config, alias_resolver=None, alias_cache=None):
+def _remap_branch(bare_repo_path, ref, config, alias_resolver=None, alias_cache=None, run_timestamp=None):
     """Remap .gitmodules on a single branch ref. Returns True if changed."""
     try:
         content = _git(["show", f"{ref}:.gitmodules"], cwd=bare_repo_path)
@@ -263,9 +265,14 @@ def _remap_branch(bare_repo_path, ref, config, alias_resolver=None, alias_cache=
     )
 
     parent = _git(["rev-parse", ref], cwd=bare_repo_path)
+    commit_env = {
+        **_REMAP_IDENTITY,
+        "GIT_AUTHOR_DATE": run_timestamp or datetime.now(timezone.utc).isoformat(),
+        "GIT_COMMITTER_DATE": run_timestamp or datetime.now(timezone.utc).isoformat(),
+    }
     new_commit = _git(
         ["commit-tree", new_tree, "-p", parent, "-m", _COMMIT_MSG],
-        cwd=bare_repo_path, env_extra=_REMAP_ENV,
+        cwd=bare_repo_path, env_extra=commit_env,
     )
 
     _git(["update-ref", ref, new_commit], cwd=bare_repo_path)
