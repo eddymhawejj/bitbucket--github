@@ -434,7 +434,7 @@ def _migrate_single_repo(config, bb, gh, state, project_key, repo_slug, repo_nam
 
     # 5. Remap submodule URLs from Bitbucket to GitHub
     submodules_remapped = remap_submodules_in_bare_repo(
-        bare_path, config, alias_resolver=bb.resolve_project_key,
+        bare_path, config, alias_resolver=bb.resolve_repo_location,
     )
     has_submodules = submodules_remapped > 0
     try:

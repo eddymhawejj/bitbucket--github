@@ -107,7 +107,10 @@ def remap_submodule_urls(content, config, alias_resolver=None):
     gh_ssh_url = config.gh_ssh_url
     gh_ssh_host = config.gh_ssh_host
     gh_https_base = config.gh_base_url.replace("/api/v3", "").rstrip("/")
-    alias_cache = dict(config.project_aliases)
+    alias_cache = {}
+    # Pre-populate from manual project_aliases config
+    # These are project-level overrides, stored as PROJECT/slug -> (resolved_project, slug)
+    project_aliases = getattr(config, "project_aliases", {})
 
     urls = _extract_submodule_urls(content)
     if not urls:
@@ -129,11 +132,11 @@ def remap_submodule_urls(content, config, alias_resolver=None):
 
         project_key_raw, slug = parsed
         resolved = None
-        # Try the raw key, its uppercase, cached alias, and auto-resolved alias
+        # Try the raw key, its uppercase, and manual project alias
         candidates = [project_key_raw.upper(), project_key_raw]
-        alias = alias_cache.get(project_key_raw.upper())
-        if alias:
-            candidates.insert(0, alias)
+        manual_alias = project_aliases.get(project_key_raw.upper())
+        if manual_alias:
+            candidates.insert(0, manual_alias)
         for pk in candidates:
             if config.bb_projects and pk not in config.bb_projects:
                 continue
@@ -143,14 +146,21 @@ def remap_submodule_urls(content, config, alias_resolver=None):
             break
 
         # Auto-resolve via Bitbucket API if still unresolved
-        if not resolved and alias_resolver and project_key_raw.upper() not in alias_cache:
-            real_key = alias_resolver(project_key_raw)
-            if real_key:
-                alias_cache[project_key_raw.upper()] = real_key.upper()
-                pk = real_key.upper()
+        # Handles both renamed projects AND repos moved between projects
+        if not resolved and alias_resolver:
+            cache_key = f"{project_key_raw.upper()}/{slug}"
+            if cache_key not in alias_cache:
+                real_proj, real_slug = alias_resolver(project_key_raw, slug)
+                if real_proj:
+                    alias_cache[cache_key] = (real_proj.upper(), real_slug or slug)
+                else:
+                    alias_cache[cache_key] = None
+            cached = alias_cache.get(cache_key)
+            if cached:
+                pk, resolved_slug = cached
                 if not config.bb_projects or pk in config.bb_projects:
-                    if config.should_migrate_repo(pk, slug):
-                        resolved = config.resolve_target(pk, slug)
+                    if config.should_migrate_repo(pk, resolved_slug):
+                        resolved = config.resolve_target(pk, resolved_slug)
 
         if not resolved:
             logger.warning(

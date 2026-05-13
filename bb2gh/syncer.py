@@ -200,7 +200,7 @@ class Syncer:
 
         # Remap submodule URLs from Bitbucket to GitHub
         remap_submodules_in_bare_repo(bare_path, self.config,
-                                     alias_resolver=self._bb.resolve_project_key)
+                                     alias_resolver=self._bb.resolve_repo_location)
 
         # LFS: only run if repo actually has large blobs (fast pre-check)
         has_lfs = False

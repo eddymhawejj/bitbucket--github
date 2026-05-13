@@ -55,6 +55,25 @@ class BitbucketClient:
             pass
         return None
 
+    def resolve_repo_location(self, project_key, repo_slug):
+        """Resolve a repo's current project and slug, following moves/aliases.
+
+        When a repo is moved from one project to another, Bitbucket keeps
+        the old URL alive. This method returns the current (project_key, slug).
+        """
+        url = f"{self.api_url}/projects/{project_key}/repos/{repo_slug}"
+        try:
+            resp = self.session.get(url)
+            if resp.status_code == 200:
+                data = resp.json()
+                real_project = data.get("project", {}).get("key")
+                real_slug = data.get("slug")
+                if real_project:
+                    return real_project, real_slug or repo_slug
+        except Exception:
+            pass
+        return None, None
+
     def list_repos(self, project_key):
         """List all repositories in a project."""
         url = f"{self.api_url}/projects/{project_key}/repos"
