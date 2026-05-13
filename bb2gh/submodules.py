@@ -132,35 +132,39 @@ def remap_submodule_urls(content, config, alias_resolver=None):
 
         project_key_raw, slug = parsed
         resolved = None
-        # Try the raw key, its uppercase, and manual project alias
-        candidates = [project_key_raw.upper(), project_key_raw]
-        manual_alias = project_aliases.get(project_key_raw.upper())
-        if manual_alias:
-            candidates.insert(0, manual_alias)
-        for pk in candidates:
-            if config.bb_projects and pk not in config.bb_projects:
-                continue
-            if not config.should_migrate_repo(pk, slug):
-                continue
-            resolved = config.resolve_target(pk, slug)
-            break
 
-        # Auto-resolve via Bitbucket API if still unresolved
-        # Handles both renamed projects AND repos moved between projects
-        if not resolved and alias_resolver:
+        # Resolve the actual repo location (handles moved repos + renamed projects)
+        actual_pk = project_key_raw.upper()
+        actual_slug = slug
+
+        # Check manual alias first
+        manual_alias = project_aliases.get(actual_pk)
+        if manual_alias:
+            actual_pk = manual_alias
+
+        # Auto-resolve via Bitbucket API (cached)
+        if alias_resolver:
             cache_key = f"{project_key_raw.upper()}/{slug}"
             if cache_key not in alias_cache:
                 real_proj, real_slug = alias_resolver(project_key_raw, slug)
-                if real_proj:
+                if real_proj and (real_proj.upper() != project_key_raw.upper() or real_slug != slug):
                     alias_cache[cache_key] = (real_proj.upper(), real_slug or slug)
+                    logger.debug("Resolved %s/%s -> %s/%s via API",
+                                 project_key_raw, slug, real_proj, real_slug or slug)
                 else:
                     alias_cache[cache_key] = None
             cached = alias_cache.get(cache_key)
             if cached:
-                pk, resolved_slug = cached
-                if not config.bb_projects or pk in config.bb_projects:
-                    if config.should_migrate_repo(pk, resolved_slug):
-                        resolved = config.resolve_target(pk, resolved_slug)
+                actual_pk, actual_slug = cached
+
+        # Now resolve using the actual (possibly redirected) project/slug
+        for pk in [actual_pk, project_key_raw.upper(), project_key_raw]:
+            if config.bb_projects and pk not in config.bb_projects:
+                continue
+            if not config.should_migrate_repo(pk, actual_slug):
+                continue
+            resolved = config.resolve_target(pk, actual_slug)
+            break
 
         if not resolved:
             logger.warning(
