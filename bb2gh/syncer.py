@@ -116,10 +116,13 @@ class Syncer:
             synced, skipped, failed,
         )
 
+    def _is_branch_protected(self, branch_name):
+        """Check if a branch matches any protected pattern (supports * glob)."""
+        from fnmatch import fnmatch
+        return any(fnmatch(branch_name, p) for p in self.config.sync_protected_branches)
+
     def _prune_unprotected_branches(self, bare_path, project_key, repo_slug):
         """Delete remote branches on GitHub that don't exist locally, except protected ones."""
-        protected = set(self.config.sync_protected_branches)
-
         # Get local branches (from Bitbucket)
         local_output = _run_git(
             ["for-each-ref", "--format=%(refname:short)", "refs/heads/"],
@@ -141,7 +144,7 @@ class Syncer:
             if len(parts) < 2:
                 continue
             ref = parts[1].replace("refs/heads/", "")
-            if ref in local_branches or ref in protected:
+            if ref in local_branches or self._is_branch_protected(ref):
                 continue
             try:
                 _run_git(["push", "github", "--delete", ref], cwd=bare_path, quiet=True)
