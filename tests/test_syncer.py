@@ -21,13 +21,17 @@ def mock_config(tmp_path):
     config.get_trim_since = MagicMock(return_value=None)
     config.push_by_branch = set()
     config.sync_protected_branches = []
+    config.bb_base_url = "https://bitbucket.example.com"
+    config.bb_token = "fake"
+    config.bb_verify_ssl = True
     return config
 
 
 class TestSyncer:
+    @patch("bb2gh.syncer.BitbucketClient")
     @patch("bb2gh.syncer.State")
     @patch("bb2gh.syncer._run_git")
-    def test_sync_repo_with_changes(self, mock_git, MockState, mock_config, tmp_path):
+    def test_sync_repo_with_changes(self, mock_git, MockState, MockBB, mock_config, tmp_path):
         """Test syncing a repo when changes are detected (no prior snapshot)."""
         bare_path = tmp_path / "PROJ__my-repo.git"
         bare_path.mkdir()
@@ -53,9 +57,10 @@ class TestSyncer:
         mock_git.assert_any_call(["push", "github", "--mirror"], cwd=str(bare_path))
         state_instance.update_sync_time.assert_called_once_with("PROJ", "my-repo")
 
+    @patch("bb2gh.syncer.BitbucketClient")
     @patch("bb2gh.syncer.State")
     @patch("bb2gh.syncer._run_git")
-    def test_sync_skips_when_no_changes(self, mock_git, MockState, mock_config, tmp_path):
+    def test_sync_skips_when_no_changes(self, mock_git, MockState, MockBB, mock_config, tmp_path):
         """Test that sync skips push when BB refs match stored snapshot."""
         bare_path = tmp_path / "PROJ__my-repo.git"
         bare_path.mkdir()
@@ -83,8 +88,9 @@ class TestSyncer:
             assert c[0][0] != ["push", "github", "--mirror"]
         state_instance.update_sync_time.assert_not_called()
 
+    @patch("bb2gh.syncer.BitbucketClient")
     @patch("bb2gh.syncer.State")
-    def test_no_migrated_repos(self, MockState, mock_config):
+    def test_no_migrated_repos(self, MockState, MockBB, mock_config):
         """Test sync when no repos are migrated yet."""
         state_instance = MockState.return_value
         state_instance.get_migrated_repos.return_value = []
@@ -92,9 +98,10 @@ class TestSyncer:
         syncer = Syncer(mock_config)
         syncer._sync_all()  # Should not raise
 
+    @patch("bb2gh.syncer.BitbucketClient")
     @patch("bb2gh.syncer.State")
     @patch("bb2gh.syncer._run_git")
-    def test_sync_handles_failure(self, mock_git, MockState, mock_config, tmp_path):
+    def test_sync_handles_failure(self, mock_git, MockState, MockBB, mock_config, tmp_path):
         """Test that sync continues if one repo fails."""
         bare1 = tmp_path / "PROJ__repo1.git"
         bare1.mkdir()
@@ -123,9 +130,10 @@ class TestSyncer:
         # repo1 failed on fetch, repo2 skipped (no changes)
         # Neither should have update_sync_time called
 
+    @patch("bb2gh.syncer.BitbucketClient")
     @patch("bb2gh.syncer.State")
     @patch("bb2gh.syncer._run_git")
-    def test_sync_logs_github_target(self, mock_git, MockState, mock_config, tmp_path):
+    def test_sync_logs_github_target(self, mock_git, MockState, MockBB, mock_config, tmp_path):
         """Test that sync uses the stored GitHub target for logging."""
         bare_path = tmp_path / "INFRA__my-service.git"
         bare_path.mkdir()

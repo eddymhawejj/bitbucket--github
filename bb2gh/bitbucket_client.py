@@ -41,6 +41,20 @@ class BitbucketClient:
         url = f"{self.api_url}/projects"
         return list(self._paginate(url))
 
+    def resolve_project_key(self, project_key):
+        """Resolve a project key, following Bitbucket aliases for renamed projects.
+
+        Returns the current/canonical project key, or None if not found.
+        """
+        url = f"{self.api_url}/projects/{project_key}"
+        try:
+            resp = self.session.get(url)
+            if resp.status_code == 200:
+                return resp.json().get("key")
+        except Exception:
+            pass
+        return None
+
     def list_repos(self, project_key):
         """List all repositories in a project."""
         url = f"{self.api_url}/projects/{project_key}/repos"

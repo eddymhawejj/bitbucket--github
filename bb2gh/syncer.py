@@ -6,6 +6,7 @@ import signal
 import subprocess
 import time
 
+from .bitbucket_client import BitbucketClient
 from .migrator import _migrate_lfs, _has_large_blobs, _trim_history, _push_branch_by_branch
 from .state import State
 from .submodules import remap_submodules_in_bare_repo
@@ -54,6 +55,8 @@ class Syncer:
     def __init__(self, config):
         self.config = config
         self.state = State(config.work_dir)
+        self._bb = BitbucketClient(config.bb_base_url, config.bb_token,
+                                   verify_ssl=config.bb_verify_ssl)
         self._running = True
 
         signal.signal(signal.SIGTERM, self._handle_signal)
@@ -193,7 +196,8 @@ class Syncer:
             _trim_history(bare_path, trim_since)
 
         # Remap submodule URLs from Bitbucket to GitHub
-        remap_submodules_in_bare_repo(bare_path, self.config)
+        remap_submodules_in_bare_repo(bare_path, self.config,
+                                     alias_resolver=self._bb.resolve_project_key)
 
         # LFS: only run if repo actually has large blobs (fast pre-check)
         has_lfs = False

@@ -92,17 +92,22 @@ def _is_already_github(url, gh_ssh_url, gh_ssh_host, gh_https_base):
     return False
 
 
-def remap_submodule_urls(content, config):
+def remap_submodule_urls(content, config, alias_resolver=None):
     """Replace Bitbucket submodule URLs in .gitmodules with GitHub URLs.
 
     If any Bitbucket URL cannot be resolved (project not migrated, repo
     excluded), the entire .gitmodules is left unchanged to avoid a mix
     of old and new URLs.
+
+    Args:
+        alias_resolver: Optional callable(project_key) -> canonical_key.
+            Used to auto-resolve renamed Bitbucket projects.
     """
     bb_hostnames = _build_bb_hostnames(config)
     gh_ssh_url = config.gh_ssh_url
     gh_ssh_host = config.gh_ssh_host
     gh_https_base = config.gh_base_url.replace("/api/v3", "").rstrip("/")
+    alias_cache = dict(config.project_aliases)
 
     urls = _extract_submodule_urls(content)
     if not urls:
@@ -124,9 +129,9 @@ def remap_submodule_urls(content, config):
 
         project_key_raw, slug = parsed
         resolved = None
-        # Try the raw key and its uppercase, plus any alias
+        # Try the raw key, its uppercase, cached alias, and auto-resolved alias
         candidates = [project_key_raw.upper(), project_key_raw]
-        alias = config.project_aliases.get(project_key_raw.upper())
+        alias = alias_cache.get(project_key_raw.upper())
         if alias:
             candidates.insert(0, alias)
         for pk in candidates:
@@ -136,6 +141,16 @@ def remap_submodule_urls(content, config):
                 continue
             resolved = config.resolve_target(pk, slug)
             break
+
+        # Auto-resolve via Bitbucket API if still unresolved
+        if not resolved and alias_resolver and project_key_raw.upper() not in alias_cache:
+            real_key = alias_resolver(project_key_raw)
+            if real_key:
+                alias_cache[project_key_raw.upper()] = real_key.upper()
+                pk = real_key.upper()
+                if not config.bb_projects or pk in config.bb_projects:
+                    if config.should_migrate_repo(pk, slug):
+                        resolved = config.resolve_target(pk, slug)
 
         if not resolved:
             logger.warning(
@@ -166,7 +181,7 @@ def remap_submodule_urls(content, config):
     return new_content
 
 
-def remap_submodules_in_bare_repo(bare_repo_path, config):
+def remap_submodules_in_bare_repo(bare_repo_path, config, alias_resolver=None):
     """Rewrite .gitmodules in all branches of a bare repo.
 
     Uses git plumbing to create deterministic commits (fixed timestamp)
@@ -188,7 +203,7 @@ def remap_submodules_in_bare_repo(bare_repo_path, config):
 
     remapped = 0
     for ref in output.strip().splitlines():
-        if _remap_branch(bare_repo_path, ref, config):
+        if _remap_branch(bare_repo_path, ref, config, alias_resolver):
             remapped += 1
 
     if remapped:
@@ -200,14 +215,14 @@ def remap_submodules_in_bare_repo(bare_repo_path, config):
     return remapped
 
 
-def _remap_branch(bare_repo_path, ref, config):
+def _remap_branch(bare_repo_path, ref, config, alias_resolver=None):
     """Remap .gitmodules on a single branch ref. Returns True if changed."""
     try:
         content = _git(["show", f"{ref}:.gitmodules"], cwd=bare_repo_path)
     except subprocess.CalledProcessError:
         return False
 
-    new_content = remap_submodule_urls(content, config)
+    new_content = remap_submodule_urls(content, config, alias_resolver=alias_resolver)
     if new_content == content:
         return False
 
