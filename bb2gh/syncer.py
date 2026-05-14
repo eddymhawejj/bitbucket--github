@@ -171,7 +171,10 @@ class Syncer:
                   "+refs/heads/*:refs/heads/*",
                   "+refs/tags/*:refs/tags/*"], cwd=bare_path)
 
-        # Compare Bitbucket's refs (post-fetch) against last sync snapshot
+        # Clean hidden refs before snapshot (so snapshot is consistent)
+        _clean_hidden_refs(bare_path)
+
+        # Compare Bitbucket's refs (post-fetch, post-clean) against last sync snapshot
         try:
             bb_refs = _run_git(["show-ref"], cwd=bare_path, quiet=True)
         except subprocess.CalledProcessError:
@@ -189,9 +192,6 @@ class Syncer:
 
         logger.info("Changes detected for %s/%s, pushing...", project_key, repo_slug)
         start = time.time()
-
-        # Clean hidden refs before pushing
-        _clean_hidden_refs(bare_path)
 
         # Trim history if configured
         trim_since = self.config.get_trim_since(project_key, repo_slug)
