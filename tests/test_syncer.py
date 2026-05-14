@@ -41,7 +41,7 @@ class TestSyncer:
         state_instance.get_github_target.return_value = ("my-org", "my-repo")
 
         def side_effect(args, cwd=None, quiet=False):
-            if args == ["show-ref"]:
+            if args == ["show-ref", "--heads", "--tags"]:
                 return "abc123 refs/heads/master"
             return ""
 
@@ -74,7 +74,7 @@ class TestSyncer:
         state_instance.get_github_target.return_value = ("my-org", "my-repo")
 
         def side_effect(args, cwd=None, quiet=False):
-            if args == ["show-ref"]:
+            if args == ["show-ref", "--heads", "--tags"]:
                 return "abc123 refs/heads/master"
             return ""
 
@@ -118,7 +118,7 @@ class TestSyncer:
         def side_effect(args, cwd=None, quiet=False):
             if "repo1" in str(cwd) and args[0] == "fetch":
                 raise Exception("Network error")
-            if args == ["show-ref"]:
+            if args == ["show-ref", "--heads", "--tags"]:
                 return "abc123 refs/heads/master"
             return ""
 
@@ -144,7 +144,7 @@ class TestSyncer:
         state_instance.get_github_target.return_value = ("infra-team", "infra-my-service")
 
         def side_effect(args, cwd=None, quiet=False):
-            if args == ["show-ref"]:
+            if args == ["show-ref", "--heads", "--tags"]:
                 return "aaa refs/heads/main"
             return ""
 

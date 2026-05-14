@@ -175,10 +175,11 @@ class Syncer:
         _clean_hidden_refs(bare_path)
 
         # Compare Bitbucket's refs (post-fetch, post-clean) against last sync snapshot
+        # Only compare heads and tags — ignore refs/remotes/* which change on every push
         try:
-            bb_refs = _run_git(["show-ref"], cwd=bare_path, quiet=True)
+            bb_heads = _run_git(["show-ref", "--heads", "--tags"], cwd=bare_path, quiet=True)
         except subprocess.CalledProcessError:
-            bb_refs = ""
+            bb_heads = ""
 
         refs_file = os.path.join(bare_path, "bb2gh_last_sync_refs")
         last_refs = ""
@@ -186,7 +187,7 @@ class Syncer:
             with open(refs_file) as f:
                 last_refs = f.read()
 
-        if bb_refs == last_refs:
+        if bb_heads == last_refs:
             logger.debug("No changes for %s/%s, skipping push", project_key, repo_slug)
             return False
 
@@ -234,7 +235,7 @@ class Syncer:
         elapsed = time.time() - start
         # Store Bitbucket's refs so next cycle can detect real changes
         with open(refs_file, "w") as f:
-            f.write(bb_refs)
+            f.write(bb_heads)
 
         self.state.update_sync_time(project_key, repo_slug)
         logger.info(
