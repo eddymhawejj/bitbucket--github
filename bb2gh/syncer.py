@@ -7,7 +7,7 @@ import subprocess
 import time
 
 from .bitbucket_client import BitbucketClient
-from .migrator import _migrate_lfs, _has_large_blobs, _trim_history, _push_branch_by_branch
+from .migrator import _migrate_lfs, _has_large_blobs, _trim_history, _push_branch_by_branch, _push_lfs_objects
 from .state import State
 from .submodules import remap_submodules_in_bare_repo
 
@@ -228,14 +228,8 @@ class Syncer:
 
         if has_lfs:
             try:
-                cmd = ["git", "lfs", "push", "--all", "github"]
-                subprocess.run(
-                    cmd, cwd=bare_path, capture_output=True, text=True,
-                    check=True, timeout=self.config.sync_lfs_timeout,
-                )
-            except subprocess.TimeoutExpired:
-                logger.warning("LFS push timed out for %s/%s", project_key, repo_slug)
-            except subprocess.CalledProcessError:
+                _push_lfs_objects(bare_path)
+            except Exception:
                 logger.warning("LFS push failed for %s/%s", project_key, repo_slug)
 
         elapsed = time.time() - start

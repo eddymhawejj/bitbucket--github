@@ -348,6 +348,26 @@ def migrate_repos(config, only_repos=None):
     return total_migrated, total_skipped, total_failed
 
 
+def _push_lfs_objects(bare_path):
+    """Push LFS objects by OID instead of scanning all refs with --all."""
+    lfs_dir = os.path.join(bare_path, "lfs", "objects")
+    if not os.path.exists(lfs_dir):
+        return
+    oids = []
+    for dirpath, _, filenames in os.walk(lfs_dir):
+        for f in filenames:
+            if len(f) == 64:
+                oids.append(f)
+    if not oids:
+        return
+    logger.info("Pushing %d LFS objects", len(oids))
+    for oid in oids:
+        try:
+            _run_git(["lfs", "push", "github", "--object-id", oid], cwd=bare_path, quiet=True)
+        except subprocess.CalledProcessError:
+            logger.warning("Failed to push LFS object %s", oid[:12])
+
+
 def _push_branch_by_branch(bare_path, project_key, repo_slug, delay=2):
     """Push branches and tags individually when --mirror pack exceeds 2GB."""
     branches = _run_git(["for-each-ref", "--format=%(refname:short)", "refs/heads/"],
@@ -477,7 +497,7 @@ def _migrate_single_repo(config, bb, gh, state, project_key, repo_slug, repo_nam
     # Push LFS objects separately — only if LFS actually converted files
     if has_lfs:
         try:
-            _run_git(["lfs", "push", "--all", "github"], cwd=bare_path)
+            _push_lfs_objects(bare_path)
         except subprocess.CalledProcessError:
             logger.warning("LFS push failed for %s/%s", gh_org, gh_repo_name)
             warnings.append("LFS push failed")
