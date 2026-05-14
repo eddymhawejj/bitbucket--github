@@ -33,7 +33,7 @@ def _run_git(args, cwd=None, quiet=False):
 def _clean_hidden_refs(bare_repo_path):
     """Remove hidden refs that can't be pushed to GitHub."""
     try:
-        output = _run_git(["show-ref"], cwd=bare_repo_path)
+        output = _run_git(["show-ref"], cwd=bare_repo_path, quiet=True)
     except subprocess.CalledProcessError:
         return
 
