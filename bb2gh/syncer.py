@@ -228,7 +228,13 @@ class Syncer:
 
         if has_lfs:
             try:
-                _run_git(["lfs", "push", "--all", "github"], cwd=bare_path)
+                cmd = ["git", "lfs", "push", "--all", "github"]
+                subprocess.run(
+                    cmd, cwd=bare_path, capture_output=True, text=True,
+                    check=True, timeout=self.config.sync_lfs_timeout,
+                )
+            except subprocess.TimeoutExpired:
+                logger.warning("LFS push timed out for %s/%s", project_key, repo_slug)
             except subprocess.CalledProcessError:
                 logger.warning("LFS push failed for %s/%s", project_key, repo_slug)
 
