@@ -66,16 +66,23 @@ def sync(ctx):
 
 
 @cli.command("migrate-prs")
+@click.option("--repo", multiple=True, help="Migrate PRs for specific repos only (PROJECT/SLUG).")
+@click.option("--include-closed", is_flag=True, help="Also migrate merged/declined PRs.")
 @click.option("--dry-run", is_flag=True, help="Log what would be done without making changes.")
 @click.pass_context
-def migrate_prs(ctx, dry_run):
-    """Migrate open pull requests from Bitbucket to GitHub.
+def migrate_prs(ctx, repo, include_closed, dry_run):
+    """Migrate pull requests from Bitbucket to GitHub.
 
     Creates matching PRs on GitHub with title, description, comments,
-    and reviewer assignments.
+    and reviewer assignments. With --include-closed, also migrates
+    merged/declined PRs by recreating branches from commit SHAs
+    (falls back to GitHub Issues if the commit no longer exists).
     """
     config = ctx.obj["config"]
-    migrated, skipped, failed = migrate_pull_requests(config, dry_run=dry_run)
+    only_repos = set(repo) if repo else None
+    migrated, skipped, failed = migrate_pull_requests(
+        config, dry_run=dry_run, include_closed=include_closed, only_repos=only_repos,
+    )
     click.echo(f"\nPR migration complete: {migrated} migrated, {skipped} skipped, {failed} failed")
     if failed > 0:
         sys.exit(1)
