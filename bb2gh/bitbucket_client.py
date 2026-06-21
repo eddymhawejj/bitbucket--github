@@ -88,6 +88,32 @@ class BitbucketClient:
         url = f"{self.api_url}/projects/{project_key}/repos/{repo_slug}/pull-requests"
         return list(self._paginate(url, params={"state": state}))
 
+    def get_pull_request(self, project_key, repo_slug, pr_id):
+        """Get a single pull request with full details (including merge properties)."""
+        url = (
+            f"{self.api_url}/projects/{project_key}/repos/{repo_slug}"
+            f"/pull-requests/{pr_id}"
+        )
+        resp = self.session.get(url)
+        resp.raise_for_status()
+        return resp.json()
+
+    def get_merge_commit(self, project_key, repo_slug, pr_id):
+        """Extract the merge/squash commit SHA for a merged PR.
+
+        Bitbucket Server stores this in properties.mergeCommit on the PR object.
+        Returns the SHA string, or None if not available.
+        """
+        try:
+            pr = self.get_pull_request(project_key, repo_slug, pr_id)
+            merge_commit = pr.get("properties", {}).get("mergeCommit", {})
+            sha = merge_commit.get("id") or merge_commit.get("displayId")
+            if sha:
+                return sha
+        except Exception:
+            logger.debug("Could not fetch merge commit from PR properties for PR #%d", pr_id)
+        return None
+
     def get_pr_activities(self, project_key, repo_slug, pr_id):
         """Get activities (comments, approvals, etc.) for a pull request."""
         url = (

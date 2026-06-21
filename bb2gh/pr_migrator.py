@@ -232,6 +232,46 @@ def _migrate_open_pr(config, bb, gh, state, project_key, repo_slug, gh_org, gh_r
     logger.info("Migrated open PR #%d -> GitHub PR #%d", pr_id, gh_pr.number)
 
 
+def _resolve_head_sha(bb, bare_path, project_key, repo_slug, pr):
+    """Find a usable commit SHA for recreating a closed PR's head branch.
+
+    Tries in order:
+    1. fromRef.latestCommit — the original branch tip (works for regular merges)
+    2. merge/squash commit from PR properties — guaranteed to exist for merged PRs
+    3. merge commit from PR activities — alternative source for the same info
+
+    Returns (sha, is_merge_commit) or (None, False).
+    """
+    pr_id = pr["id"]
+    head_sha = pr["fromRef"].get("latestCommit", "")
+
+    # 1. Original source branch tip
+    if head_sha and _commit_exists(bare_path, head_sha):
+        logger.debug("PR #%d: using fromRef.latestCommit %s", pr_id, head_sha[:12])
+        return head_sha, False
+
+    # 2. Merge/squash commit from PR properties
+    merge_sha = bb.get_merge_commit(project_key, repo_slug, pr_id)
+    if merge_sha and _commit_exists(bare_path, merge_sha):
+        logger.debug("PR #%d: using merge commit %s from properties", pr_id, merge_sha[:12])
+        return merge_sha, True
+
+    # 3. Merge commit from activities
+    try:
+        activities = bb.get_pr_activities(project_key, repo_slug, pr_id)
+        for activity in activities:
+            if activity.get("action") == "MERGED":
+                commit = activity.get("commit", {})
+                act_sha = commit.get("id") or commit.get("displayId")
+                if act_sha and _commit_exists(bare_path, act_sha):
+                    logger.debug("PR #%d: using merge commit %s from activity", pr_id, act_sha[:12])
+                    return act_sha, True
+    except Exception:
+        logger.debug("PR #%d: could not fetch activities for merge commit", pr_id)
+
+    return None, False
+
+
 def _migrate_closed_pr(config, bb, gh, state, project_key, repo_slug, gh_org, gh_repo_name, pr):
     """Migrate a closed (merged/declined) PR by recreating the branch from the commit SHA."""
     pr_id = pr["id"]
@@ -239,21 +279,40 @@ def _migrate_closed_pr(config, bb, gh, state, project_key, repo_slug, gh_org, gh
     pr_state = pr.get("state", "UNKNOWN")
     head_branch = pr["fromRef"]["displayId"]
     base_branch = pr["toRef"]["displayId"]
-    head_sha = pr["fromRef"].get("latestCommit", "")
 
     logger.info("Migrating %s PR #%d: %s (%s -> %s)", pr_state, pr_id, title, head_branch, base_branch)
 
     bare_path = os.path.join(config.work_dir, f"{project_key}__{repo_slug}.git")
 
-    # Try to recreate the source branch from the commit SHA
     temp_branch = f"migrated-pr/{pr_id}/{head_branch}"
     branch_created = False
+    pr_base = base_branch
 
-    if head_sha and os.path.exists(bare_path) and _commit_exists(bare_path, head_sha):
-        if _create_temp_branch(bare_path, temp_branch, head_sha):
-            if _push_temp_branch(bare_path, temp_branch):
-                branch_created = True
-            _delete_temp_branch(bare_path, temp_branch)
+    if os.path.exists(bare_path):
+        head_sha, is_merge_commit = _resolve_head_sha(
+            bb, bare_path, project_key, repo_slug, pr,
+        )
+
+        if head_sha:
+            if is_merge_commit:
+                # The merge/squash commit is already on the target branch.
+                # To get a meaningful diff, target the PR at the commit's parent.
+                try:
+                    parent_sha = _run_git(
+                        ["rev-parse", f"{head_sha}^"], cwd=bare_path, quiet=True,
+                    )
+                    # Create a temp base branch at the parent so the PR shows the squash diff
+                    pr_base = f"migrated-pr/{pr_id}/base"
+                    if _create_temp_branch(bare_path, pr_base, parent_sha):
+                        _push_temp_branch(bare_path, pr_base)
+                        _delete_temp_branch(bare_path, pr_base)
+                except subprocess.CalledProcessError:
+                    logger.debug("PR #%d: could not resolve parent of merge commit", pr_id)
+
+            if _create_temp_branch(bare_path, temp_branch, head_sha):
+                if _push_temp_branch(bare_path, temp_branch):
+                    branch_created = True
+                _delete_temp_branch(bare_path, temp_branch)
 
     if branch_created:
         # Create a real PR on GitHub, then close it

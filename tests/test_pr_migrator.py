@@ -10,6 +10,7 @@ from bb2gh.pr_migrator import (
     _format_pr_body,
     _format_comment,
     _map_reviewers,
+    _resolve_head_sha,
 )
 
 
@@ -239,3 +240,116 @@ class TestMigratePullRequests:
         call_kwargs = MockGH.return_value.create_pull_request.call_args
         assert call_kwargs[1]["org_name"] == "fallback-org"
         assert call_kwargs[1]["repo_name"] == "fallback-repo"
+
+
+class TestResolveHeadSha:
+    """Tests for _resolve_head_sha — the SHA resolution cascade for closed PRs."""
+
+    def _make_pr(self, head_sha="abc123"):
+        return {
+            "id": 10,
+            "fromRef": {"displayId": "feature/x", "latestCommit": head_sha},
+            "toRef": {"displayId": "main"},
+        }
+
+    @patch("bb2gh.pr_migrator._commit_exists")
+    def test_uses_from_ref_when_commit_exists(self, mock_exists):
+        mock_exists.return_value = True
+        bb = MagicMock()
+
+        sha, is_merge = _resolve_head_sha(bb, "/repo.git", "PROJ", "repo", self._make_pr("deadbeef"))
+
+        assert sha == "deadbeef"
+        assert is_merge is False
+        bb.get_merge_commit.assert_not_called()
+
+    @patch("bb2gh.pr_migrator._commit_exists")
+    def test_falls_back_to_merge_commit_property(self, mock_exists):
+        mock_exists.side_effect = lambda path, sha: sha == "squash111"
+        bb = MagicMock()
+        bb.get_merge_commit.return_value = "squash111"
+
+        sha, is_merge = _resolve_head_sha(bb, "/repo.git", "PROJ", "repo", self._make_pr("gone"))
+
+        assert sha == "squash111"
+        assert is_merge is True
+
+    @patch("bb2gh.pr_migrator._commit_exists")
+    def test_falls_back_to_merge_activity(self, mock_exists):
+        mock_exists.side_effect = lambda path, sha: sha == "act222"
+        bb = MagicMock()
+        bb.get_merge_commit.return_value = None
+        bb.get_pr_activities.return_value = [
+            {"action": "COMMENTED", "comment": {"text": "hi"}},
+            {"action": "MERGED", "commit": {"id": "act222", "displayId": "act222"}},
+        ]
+
+        sha, is_merge = _resolve_head_sha(bb, "/repo.git", "PROJ", "repo", self._make_pr("gone"))
+
+        assert sha == "act222"
+        assert is_merge is True
+
+    @patch("bb2gh.pr_migrator._commit_exists")
+    def test_returns_none_when_nothing_found(self, mock_exists):
+        mock_exists.return_value = False
+        bb = MagicMock()
+        bb.get_merge_commit.return_value = None
+        bb.get_pr_activities.return_value = []
+
+        sha, is_merge = _resolve_head_sha(bb, "/repo.git", "PROJ", "repo", self._make_pr("gone"))
+
+        assert sha is None
+        assert is_merge is False
+
+    @patch("bb2gh.pr_migrator._commit_exists")
+    def test_handles_empty_latest_commit(self, mock_exists):
+        mock_exists.return_value = False
+        bb = MagicMock()
+        bb.get_merge_commit.return_value = None
+        bb.get_pr_activities.return_value = []
+
+        sha, is_merge = _resolve_head_sha(bb, "/repo.git", "PROJ", "repo", self._make_pr(""))
+
+        assert sha is None
+        assert is_merge is False
+
+
+class TestFormatPrBodyClosed:
+    def test_includes_closed_state(self, sample_pr, mock_config):
+        body = _format_pr_body(sample_pr, mock_config, closed_state="MERGED")
+        assert "MERGED" in body
+        assert "Original status" in body
+
+    def test_no_status_for_open(self, sample_pr, mock_config):
+        body = _format_pr_body(sample_pr, mock_config)
+        assert "Original status" not in body
+
+
+class TestMigrateClosedDryRun:
+    @patch("bb2gh.pr_migrator.State")
+    @patch("bb2gh.pr_migrator.GithubClient")
+    @patch("bb2gh.pr_migrator.BitbucketClient")
+    def test_dry_run_includes_closed_prs(self, MockBB, MockGH, MockState, mock_config, sample_pr):
+        state_instance = MockState.return_value
+        state_instance.get_migrated_repos.return_value = [("PROJ", "my-repo")]
+        state_instance.get_github_target.return_value = ("my-org", "my-repo")
+        state_instance.is_pr_migrated.return_value = False
+
+        merged_pr = dict(sample_pr, id=99, state="MERGED",
+                         title="Already merged")
+        merged_pr["fromRef"] = dict(sample_pr["fromRef"], latestCommit="aaa")
+
+        bb_instance = MockBB.return_value
+        bb_instance.list_pull_requests.side_effect = lambda proj, repo, state: {
+            "OPEN": [sample_pr],
+            "MERGED": [merged_pr],
+            "DECLINED": [],
+        }[state]
+
+        migrated, skipped, failed = migrate_pull_requests(
+            mock_config, dry_run=True, include_closed=True,
+        )
+
+        assert migrated == 2
+        assert skipped == 0
+        MockGH.return_value.create_pull_request.assert_not_called()
