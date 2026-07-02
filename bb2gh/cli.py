@@ -67,21 +67,40 @@ def sync(ctx):
 
 @cli.command("migrate-prs")
 @click.option("--repo", multiple=True, help="Migrate PRs for specific repos only (PROJECT/SLUG).")
-@click.option("--include-closed", is_flag=True, help="Also migrate merged/declined PRs.")
+@click.option("--include-closed", is_flag=True, help="Also migrate merged/declined PRs (in addition to open).")
+@click.option("--closed-only", is_flag=True, help="Migrate ONLY merged/declined PRs, skip open ones.")
+@click.option("--api-delay", type=float, default=None,
+              help="Seconds between API calls (default from config, or 0.5).")
+@click.option("--pr-delay", type=float, default=None,
+              help="Seconds between full PR migrations (default from config, or 3.0).")
 @click.option("--dry-run", is_flag=True, help="Log what would be done without making changes.")
 @click.pass_context
-def migrate_prs(ctx, repo, include_closed, dry_run):
+def migrate_prs(ctx, repo, include_closed, closed_only, api_delay, pr_delay, dry_run):
     """Migrate pull requests from Bitbucket to GitHub.
 
     Creates matching PRs on GitHub with title, description, comments,
     and reviewer assignments. With --include-closed, also migrates
     merged/declined PRs by recreating branches from commit SHAs
     (falls back to GitHub Issues if the commit no longer exists).
+    With --closed-only, skips open PRs entirely (useful if you've
+    already migrated the open ones).
+
+    Rate limiting: --api-delay controls minimum spacing between GitHub
+    API calls; --pr-delay adds a pause between full PR migrations.
+    Both fall back to the pr_migration section of config.yaml.
     """
     config = ctx.obj["config"]
     only_repos = set(repo) if repo else None
+
+    if api_delay is not None:
+        config.pr_api_delay = api_delay
+    if pr_delay is not None:
+        config.pr_pr_delay = pr_delay
+
     migrated, skipped, failed = migrate_pull_requests(
-        config, dry_run=dry_run, include_closed=include_closed, only_repos=only_repos,
+        config, dry_run=dry_run,
+        include_closed=include_closed, closed_only=closed_only,
+        only_repos=only_repos,
     )
     click.echo(f"\nPR migration complete: {migrated} migrated, {skipped} skipped, {failed} failed")
     if failed > 0:

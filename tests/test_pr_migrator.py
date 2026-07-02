@@ -7,11 +7,23 @@ import pytest
 from bb2gh.config import Config
 from bb2gh.pr_migrator import (
     migrate_pull_requests,
+    Throttler,
     _format_pr_body,
     _format_comment,
     _map_reviewers,
     _resolve_head_sha,
 )
+
+
+@pytest.fixture(autouse=True)
+def fast_throttler(monkeypatch):
+    """Ensure Throttler defaults to zero-delay for all tests."""
+    original_init = Throttler.__init__
+
+    def zero_init(self, api_delay=0.5, pr_delay=3.0, max_retries=5):
+        original_init(self, api_delay=0, pr_delay=0, max_retries=max_retries)
+
+    monkeypatch.setattr(Throttler, "__init__", zero_init)
 
 
 @pytest.fixture
@@ -353,3 +365,98 @@ class TestMigrateClosedDryRun:
         assert migrated == 2
         assert skipped == 0
         MockGH.return_value.create_pull_request.assert_not_called()
+
+    @patch("bb2gh.pr_migrator.State")
+    @patch("bb2gh.pr_migrator.GithubClient")
+    @patch("bb2gh.pr_migrator.BitbucketClient")
+    def test_closed_only_skips_open(self, MockBB, MockGH, MockState, mock_config, sample_pr):
+        state_instance = MockState.return_value
+        state_instance.get_migrated_repos.return_value = [("PROJ", "my-repo")]
+        state_instance.get_github_target.return_value = ("my-org", "my-repo")
+        state_instance.is_pr_migrated.return_value = False
+
+        merged_pr = dict(sample_pr, id=99, state="MERGED", title="Old merged PR")
+        merged_pr["fromRef"] = dict(sample_pr["fromRef"], latestCommit="aaa")
+
+        bb_instance = MockBB.return_value
+        calls = []
+        def list_prs(proj, repo, state):
+            calls.append(state)
+            return {"MERGED": [merged_pr], "DECLINED": []}.get(state, [])
+        bb_instance.list_pull_requests.side_effect = list_prs
+
+        migrated, _, _ = migrate_pull_requests(
+            mock_config, dry_run=True, closed_only=True,
+        )
+
+        # Only one PR (the merged one), OPEN was never queried
+        assert migrated == 1
+        assert "OPEN" not in calls
+        assert "MERGED" in calls
+        assert "DECLINED" in calls
+
+
+class TestThrottler:
+    def test_call_retries_on_rate_limit(self, monkeypatch):
+        from bb2gh.pr_migrator import Throttler
+        import github
+
+        throttler = Throttler(api_delay=0, pr_delay=0, max_retries=3)
+
+        # Fake rate-limit exception on first two calls, success on third
+        attempts = {"n": 0}
+        def flaky():
+            attempts["n"] += 1
+            if attempts["n"] < 3:
+                exc = github.GithubException(429, {"message": "too fast"}, {"Retry-After": "0"})
+                raise exc
+            return "ok"
+
+        result = throttler.call(flaky)
+        assert result == "ok"
+        assert attempts["n"] == 3
+
+    def test_call_raises_after_max_retries(self):
+        from bb2gh.pr_migrator import Throttler
+        import github
+
+        throttler = Throttler(api_delay=0, pr_delay=0, max_retries=2)
+
+        def always_fail():
+            raise github.GithubException(429, {"message": "no"}, {"Retry-After": "0"})
+
+        with pytest.raises(github.GithubException):
+            throttler.call(always_fail)
+
+    def test_call_reraises_non_rate_limit(self):
+        from bb2gh.pr_migrator import Throttler
+        import github
+
+        throttler = Throttler(api_delay=0, pr_delay=0, max_retries=3)
+
+        def not_found():
+            raise github.GithubException(404, {"message": "gone"}, {})
+
+        with pytest.raises(github.GithubException) as exc_info:
+            throttler.call(not_found)
+        assert exc_info.value.status == 404
+
+    def test_wait_api_spacing(self, monkeypatch):
+        from bb2gh.pr_migrator import Throttler
+
+        sleeps = []
+        monkeypatch.setattr("bb2gh.pr_migrator.time.sleep", lambda s: sleeps.append(s))
+
+        # First call returns 100.1 (elapsed check), second returns 100.5 (record)
+        times = iter([100.1, 100.5])
+        monkeypatch.setattr(
+            "bb2gh.pr_migrator.time.monotonic", lambda: next(times),
+        )
+
+        throttler = Throttler(api_delay=0.5, pr_delay=0, max_retries=0)
+        throttler.api_delay = 0.5  # override autouse zeroing
+        throttler._last_call = 100.0  # simulate a previous call at t=100.0
+        throttler.wait_api()
+
+        # elapsed = 100.1 - 100.0 = 0.1, so remaining = 0.5 - 0.1 = 0.4
+        assert sleeps and abs(sleeps[0] - 0.4) < 0.01

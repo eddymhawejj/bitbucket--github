@@ -42,6 +42,13 @@ class Config:
         )
         self.sync_protected_branches = sync.get("protected_branches", [])
 
+        # PR migration settings
+        pr = raw.get("pr_migration", {})
+        self.pr_api_delay = pr.get("api_delay_seconds", 0.5)
+        self.pr_pr_delay = pr.get("pr_delay_seconds", 3.0)
+        self.pr_retry_on_rate_limit = pr.get("retry_on_rate_limit", True)
+        self.pr_max_retries = pr.get("max_retries", 5)
+
         # User mapping (Bitbucket username -> GitHub username)
         self.user_mapping = raw.get("user_mapping", {})
 
