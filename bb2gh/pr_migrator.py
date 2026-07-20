@@ -1,9 +1,13 @@
-"""Migrate pull requests from Bitbucket Server to GitHub Enterprise."""
+"""Migrate pull requests from Bitbucket Server to GitHub Enterprise.
+
+Open PRs are migrated as GitHub PRs (they have a live branch).
+Closed PRs (MERGED, DECLINED) are migrated as closed GitHub Issues with
+all their comments preserved. Everything lives in one place — the issue
+tracker — so PR history is searchable alongside code review discussions.
+"""
 
 import logging
-import os
 import random
-import subprocess
 import time
 
 from github import GithubException
@@ -25,7 +29,6 @@ class Throttler:
         self._last_call = 0.0
 
     def wait_api(self):
-        """Sleep to enforce minimum spacing between API calls."""
         if self.api_delay <= 0:
             return
         elapsed = time.monotonic() - self._last_call
@@ -35,12 +38,10 @@ class Throttler:
         self._last_call = time.monotonic()
 
     def wait_between_prs(self):
-        """Sleep between full PR migrations."""
         if self.pr_delay > 0:
             time.sleep(self.pr_delay)
 
     def call(self, fn, *args, **kwargs):
-        """Invoke fn(*args, **kwargs) with rate limiting and retry on 429/403."""
         for attempt in range(self.max_retries + 1):
             self.wait_api()
             try:
@@ -76,34 +77,23 @@ class Throttler:
         return min(60.0, (2 ** attempt) + random.random())
 
 
-def _run_git(args, cwd=None, quiet=False):
-    cmd = ["git"] + args
-    result = subprocess.run(
-        cmd, cwd=cwd, capture_output=True, text=True, check=False
-    )
-    if result.returncode != 0:
-        if not quiet:
-            logger.error("git %s failed: %s", args[0], result.stderr.strip())
-        raise subprocess.CalledProcessError(
-            result.returncode, cmd, result.stdout, result.stderr
-        )
-    return result.stdout.strip()
-
-
 def _format_pr_body(pr, config, closed_state=None):
-    """Format the GitHub PR body with migration metadata."""
+    """Format the GitHub PR/issue body with migration metadata."""
     bb_url = config.bb_base_url
     project = pr["toRef"]["repository"]["project"]["key"]
     repo = pr["toRef"]["repository"]["slug"]
     pr_id = pr["id"]
     author = pr["author"]["user"].get("displayName", pr["author"]["user"].get("name", "Unknown"))
     created = pr.get("createdDate", "")
+    head_branch = pr["fromRef"]["displayId"]
+    base_branch = pr["toRef"]["displayId"]
 
     header = (
         f"> **Migrated from Bitbucket**\n"
         f"> Source: [{project}/{repo} PR #{pr_id}]"
         f"({bb_url}/projects/{project}/repos/{repo}/pull-requests/{pr_id})\n"
         f"> Original author: **{author}**\n"
+        f"> Branch: `{head_branch}` → `{base_branch}`\n"
     )
     if created:
         header += f"> Created: {created}\n"
@@ -115,7 +105,7 @@ def _format_pr_body(pr, config, closed_state=None):
 
 
 def _format_comment(activity, config):
-    """Format a Bitbucket comment as a GitHub PR comment."""
+    """Format a Bitbucket comment for GitHub."""
     comment = activity.get("comment", {})
     user = comment.get("author", {})
     display_name = user.get("displayName", user.get("name", "Unknown"))
@@ -141,39 +131,11 @@ def _map_reviewers(pr, config):
     return reviewers
 
 
-def _commit_exists(bare_path, sha):
-    """Check if a commit SHA exists in the bare repo."""
-    try:
-        _run_git(["cat-file", "-t", sha], cwd=bare_path, quiet=True)
-        return True
-    except subprocess.CalledProcessError:
-        return False
-
-
-def _create_temp_branch(bare_path, branch_name, sha):
-    """Create a branch pointing to a specific commit in the bare repo."""
-    try:
-        _run_git(["branch", branch_name, sha], cwd=bare_path, quiet=True)
-        return True
-    except subprocess.CalledProcessError:
-        return False
-
-
-def _push_temp_branch(bare_path, branch_name):
-    """Push a branch to the github remote."""
-    try:
-        _run_git(["push", "github", f"{branch_name}:{branch_name}"], cwd=bare_path, quiet=True)
-        return True
-    except subprocess.CalledProcessError:
-        return False
-
-
-def _delete_temp_branch(bare_path, branch_name):
-    """Delete a local branch from the bare repo."""
-    try:
-        _run_git(["branch", "-D", branch_name], cwd=bare_path, quiet=True)
-    except subprocess.CalledProcessError:
-        pass
+def _iter_comment_activities(activities):
+    """Yield COMMENTED activities in chronological order (oldest first)."""
+    comments = [a for a in activities if a.get("action") == "COMMENTED" and "comment" in a]
+    comments.sort(key=lambda a: a.get("comment", {}).get("createdDate") or a.get("createdDate", 0))
+    return comments
 
 
 def migrate_pull_requests(
@@ -185,11 +147,10 @@ def migrate_pull_requests(
     Args:
         config: Config object.
         dry_run: If True, log what would be done without making changes.
-        include_closed: If True, also migrate merged/declined PRs.
-        closed_only: If True, migrate ONLY merged/declined PRs (skip open ones).
-            Implies include_closed.
+        include_closed: If True, also migrate merged/declined PRs (as issues).
+        closed_only: If True, migrate ONLY merged/declined PRs. Implies include_closed.
         only_repos: Optional set of "PROJECT/SLUG" strings to filter repos.
-        throttler: Optional Throttler instance. If None, built from config.
+        throttler: Optional Throttler instance. Defaults are read from config.
     """
     if closed_only:
         include_closed = True
@@ -253,13 +214,11 @@ def migrate_pull_requests(
                 total_skipped += 1
                 continue
 
-            head_branch = pr["fromRef"]["displayId"]
-            base_branch = pr["toRef"]["displayId"]
-
             if dry_run:
+                target = "PR" if pr_state == "OPEN" else "closed Issue"
                 logger.info(
-                    "[DRY RUN] Would migrate PR #%d [%s]: %s (%s -> %s) to %s/%s",
-                    pr_id, pr_state, title, head_branch, base_branch, gh_org, gh_repo_name,
+                    "[DRY RUN] Would migrate PR #%d [%s] as %s: %s -> %s/%s",
+                    pr_id, pr_state, target, title, gh_org, gh_repo_name,
                 )
                 total_migrated += 1
                 continue
@@ -271,7 +230,7 @@ def migrate_pull_requests(
                         gh_org, gh_repo_name, pr, throttler,
                     )
                 else:
-                    _migrate_closed_pr(
+                    _migrate_closed_pr_as_issue(
                         config, bb, gh, state, project_key, repo_slug,
                         gh_org, gh_repo_name, pr, throttler,
                     )
@@ -292,7 +251,7 @@ def migrate_pull_requests(
 
 def _migrate_open_pr(config, bb, gh, state, project_key, repo_slug,
                      gh_org, gh_repo_name, pr, throttler):
-    """Migrate an open pull request."""
+    """Migrate an open PR as a GitHub PR."""
     pr_id = pr["id"]
     title = pr["title"]
     head_branch = pr["fromRef"]["displayId"]
@@ -307,8 +266,12 @@ def _migrate_open_pr(config, bb, gh, state, project_key, repo_slug,
         head=head_branch, base=base_branch, org_name=gh_org,
     )
 
-    _migrate_pr_comments(bb, gh, config, project_key, repo_slug,
-                         gh_org, gh_repo_name, pr_id, gh_pr.number, throttler)
+    activities = bb.get_pr_activities(project_key, repo_slug, pr_id)
+    for activity in _iter_comment_activities(activities):
+        comment_body = _format_comment(activity, config)
+        throttler.call(
+            gh.add_pr_comment, gh_repo_name, gh_pr.number, comment_body, org_name=gh_org,
+        )
 
     reviewers = _map_reviewers(pr, config)
     if reviewers:
@@ -320,168 +283,50 @@ def _migrate_open_pr(config, bb, gh, state, project_key, repo_slug,
     logger.info("Migrated open PR #%d -> GitHub PR #%d", pr_id, gh_pr.number)
 
 
-def _resolve_head_sha(bb, bare_path, project_key, repo_slug, pr):
-    """Find a usable commit SHA for recreating a closed PR's head branch.
+def _migrate_closed_pr_as_issue(config, bb, gh, state, project_key, repo_slug,
+                                gh_org, gh_repo_name, pr, throttler):
+    """Migrate a closed (merged/declined) PR as a closed GitHub Issue.
 
-    Tries in order:
-    1. fromRef.latestCommit — the original branch tip (works for regular merges)
-    2. merge/squash commit from PR properties — guaranteed to exist for merged PRs
-    3. merge commit from PR activities — alternative source for the same info
-
-    Returns (sha, is_merge_commit) or (None, False).
+    Everything lives in one place — the issue tracker — so PR history is
+    searchable alongside other issues. No branch recreation, no repo access
+    needed, works even when the source branch has been GC'd.
     """
     pr_id = pr["id"]
-    head_sha = pr["fromRef"].get("latestCommit", "")
-
-    # 1. Original source branch tip
-    if head_sha and _commit_exists(bare_path, head_sha):
-        logger.debug("PR #%d: using fromRef.latestCommit %s", pr_id, head_sha[:12])
-        return head_sha, False
-
-    # 2. Merge/squash commit from PR properties
-    merge_sha = bb.get_merge_commit(project_key, repo_slug, pr_id)
-    if merge_sha and _commit_exists(bare_path, merge_sha):
-        logger.debug("PR #%d: using merge commit %s from properties", pr_id, merge_sha[:12])
-        return merge_sha, True
-
-    # 3. Merge commit from activities
-    try:
-        activities = bb.get_pr_activities(project_key, repo_slug, pr_id)
-        for activity in activities:
-            if activity.get("action") == "MERGED":
-                commit = activity.get("commit", {})
-                act_sha = commit.get("id") or commit.get("displayId")
-                if act_sha and _commit_exists(bare_path, act_sha):
-                    logger.debug("PR #%d: using merge commit %s from activity", pr_id, act_sha[:12])
-                    return act_sha, True
-    except Exception:
-        logger.debug("PR #%d: could not fetch activities for merge commit", pr_id)
-
-    return None, False
-
-
-def _migrate_closed_pr(config, bb, gh, state, project_key, repo_slug,
-                       gh_org, gh_repo_name, pr, throttler):
-    """Migrate a closed (merged/declined) PR by recreating the branch from the commit SHA."""
-    pr_id = pr["id"]
     title = pr["title"]
     pr_state = pr.get("state", "UNKNOWN")
-    head_branch = pr["fromRef"]["displayId"]
-    base_branch = pr["toRef"]["displayId"]
 
-    logger.info("Migrating %s PR #%d: %s (%s -> %s)", pr_state, pr_id, title, head_branch, base_branch)
-
-    bare_path = os.path.join(config.work_dir, f"{project_key}__{repo_slug}.git")
-
-    temp_branch = f"migrated-pr/{pr_id}/{head_branch}"
-    branch_created = False
-    pr_base = base_branch
-
-    if os.path.exists(bare_path):
-        head_sha, is_merge_commit = _resolve_head_sha(
-            bb, bare_path, project_key, repo_slug, pr,
-        )
-
-        if head_sha:
-            if is_merge_commit:
-                try:
-                    parent_sha = _run_git(
-                        ["rev-parse", f"{head_sha}^"], cwd=bare_path, quiet=True,
-                    )
-                    pr_base = f"migrated-pr/{pr_id}/base"
-                    if _create_temp_branch(bare_path, pr_base, parent_sha):
-                        _push_temp_branch(bare_path, pr_base)
-                        _delete_temp_branch(bare_path, pr_base)
-                except subprocess.CalledProcessError:
-                    logger.debug("PR #%d: could not resolve parent of merge commit", pr_id)
-
-            if _create_temp_branch(bare_path, temp_branch, head_sha):
-                if _push_temp_branch(bare_path, temp_branch):
-                    branch_created = True
-                _delete_temp_branch(bare_path, temp_branch)
-
-    if branch_created:
-        body = _format_pr_body(pr, config, closed_state=pr_state)
-        try:
-            gh_pr = throttler.call(
-                gh.create_pull_request,
-                repo_name=gh_repo_name,
-                title=f"[{pr_state}] {title}",
-                body=body,
-                head=temp_branch,
-                base=base_branch,
-                org_name=gh_org,
-            )
-
-            _migrate_pr_comments(bb, gh, config, project_key, repo_slug,
-                                 gh_org, gh_repo_name, pr_id, gh_pr.number, throttler)
-
-            throttler.call(
-                gh.add_pr_comment,
-                gh_repo_name, gh_pr.number,
-                f"This PR was **{pr_state.lower()}** on Bitbucket. "
-                f"Migrated for historical reference.",
-                org_name=gh_org,
-            )
-
-            repo = throttler.call(gh.get_repo, gh_repo_name, org_name=gh_org)
-            gh_pull = throttler.call(repo.get_pull, gh_pr.number)
-            throttler.call(gh_pull.edit, state="closed")
-
-            state.record_pr_mapping(project_key, repo_slug, pr_id, gh_pr.number)
-            logger.info("Migrated %s PR #%d -> GitHub PR #%d (closed)", pr_state, pr_id, gh_pr.number)
-            return
-
-        except Exception:
-            logger.warning("Could not create PR for %s PR #%d, falling back to issue", pr_state, pr_id)
-
-    _migrate_pr_as_issue(config, bb, gh, state, project_key, repo_slug,
-                         gh_org, gh_repo_name, pr, throttler)
-
-
-def _migrate_pr_as_issue(config, bb, gh, state, project_key, repo_slug,
-                         gh_org, gh_repo_name, pr, throttler):
-    """Migrate a PR as a GitHub Issue (when branch can't be recreated)."""
-    pr_id = pr["id"]
-    title = pr["title"]
-    pr_state = pr.get("state", "UNKNOWN")
+    logger.info("Migrating %s PR #%d as issue: %s", pr_state, pr_id, title)
 
     body = _format_pr_body(pr, config, closed_state=pr_state)
-    body += f"\n\n---\n*Migrated as issue because the source branch could not be recreated.*"
 
     repo = throttler.call(gh.get_repo, gh_repo_name, org_name=gh_org)
 
-    issue = throttler.call(
-        repo.create_issue,
-        title=f"[Migrated {pr_state} PR #{pr_id}] {title}",
-        body=body,
-        labels=["migrated-pr", pr_state.lower()],
-    )
+    labels = ["migrated-pr", pr_state.lower()]
+    try:
+        issue = throttler.call(
+            repo.create_issue,
+            title=f"[{pr_state} PR #{pr_id}] {title}",
+            body=body,
+            labels=labels,
+        )
+    except GithubException as e:
+        # Labels don't exist yet — create without labels
+        if e.status in (404, 422):
+            logger.debug("Labels not found on %s, creating issue without labels", gh_repo_name)
+            issue = throttler.call(
+                repo.create_issue,
+                title=f"[{pr_state} PR #{pr_id}] {title}",
+                body=body,
+            )
+        else:
+            raise
 
     activities = bb.get_pr_activities(project_key, repo_slug, pr_id)
-    for activity in activities:
-        action = activity.get("action", "")
-        if action == "COMMENTED" and "comment" in activity:
-            comment_body = _format_comment(activity, config)
-            throttler.call(issue.create_comment, comment_body)
+    for activity in _iter_comment_activities(activities):
+        comment_body = _format_comment(activity, config)
+        throttler.call(issue.create_comment, comment_body)
 
     throttler.call(issue.edit, state="closed")
 
     state.record_pr_mapping(project_key, repo_slug, pr_id, issue.number)
     logger.info("Migrated %s PR #%d -> GitHub Issue #%d (closed)", pr_state, pr_id, issue.number)
-
-
-def _migrate_pr_comments(bb, gh, config, project_key, repo_slug,
-                         gh_org, gh_repo_name, pr_id, gh_pr_number, throttler):
-    """Migrate comments from a Bitbucket PR to a GitHub PR."""
-    activities = bb.get_pr_activities(project_key, repo_slug, pr_id)
-    comment_count = 0
-    for activity in activities:
-        action = activity.get("action", "")
-        if action == "COMMENTED" and "comment" in activity:
-            comment_body = _format_comment(activity, config)
-            throttler.call(
-                gh.add_pr_comment, gh_repo_name, gh_pr_number, comment_body, org_name=gh_org,
-            )
-            comment_count += 1
-    return comment_count

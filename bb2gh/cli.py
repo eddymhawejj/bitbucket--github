@@ -78,12 +78,13 @@ def sync(ctx):
 def migrate_prs(ctx, repo, include_closed, closed_only, api_delay, pr_delay, dry_run):
     """Migrate pull requests from Bitbucket to GitHub.
 
-    Creates matching PRs on GitHub with title, description, comments,
-    and reviewer assignments. With --include-closed, also migrates
-    merged/declined PRs by recreating branches from commit SHAs
-    (falls back to GitHub Issues if the commit no longer exists).
-    With --closed-only, skips open PRs entirely (useful if you've
-    already migrated the open ones).
+    Open PRs become GitHub PRs (with title, description, comments, and
+    reviewers). Closed PRs (MERGED/DECLINED) become closed GitHub Issues
+    with all their comments, labeled `migrated-pr` + `merged`/`declined`,
+    so everything is searchable in one place.
+
+    --include-closed migrates open PRs plus closed ones as issues.
+    --closed-only skips open PRs entirely (use after migrating open ones).
 
     Rate limiting: --api-delay controls minimum spacing between GitHub
     API calls; --pr-delay adds a pause between full PR migrations.

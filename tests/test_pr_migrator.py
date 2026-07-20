@@ -11,7 +11,7 @@ from bb2gh.pr_migrator import (
     _format_pr_body,
     _format_comment,
     _map_reviewers,
-    _resolve_head_sha,
+    _iter_comment_activities,
 )
 
 
@@ -254,76 +254,158 @@ class TestMigratePullRequests:
         assert call_kwargs[1]["repo_name"] == "fallback-repo"
 
 
-class TestResolveHeadSha:
-    """Tests for _resolve_head_sha — the SHA resolution cascade for closed PRs."""
-
-    def _make_pr(self, head_sha="abc123"):
-        return {
-            "id": 10,
-            "fromRef": {"displayId": "feature/x", "latestCommit": head_sha},
-            "toRef": {"displayId": "main"},
-        }
-
-    @patch("bb2gh.pr_migrator._commit_exists")
-    def test_uses_from_ref_when_commit_exists(self, mock_exists):
-        mock_exists.return_value = True
-        bb = MagicMock()
-
-        sha, is_merge = _resolve_head_sha(bb, "/repo.git", "PROJ", "repo", self._make_pr("deadbeef"))
-
-        assert sha == "deadbeef"
-        assert is_merge is False
-        bb.get_merge_commit.assert_not_called()
-
-    @patch("bb2gh.pr_migrator._commit_exists")
-    def test_falls_back_to_merge_commit_property(self, mock_exists):
-        mock_exists.side_effect = lambda path, sha: sha == "squash111"
-        bb = MagicMock()
-        bb.get_merge_commit.return_value = "squash111"
-
-        sha, is_merge = _resolve_head_sha(bb, "/repo.git", "PROJ", "repo", self._make_pr("gone"))
-
-        assert sha == "squash111"
-        assert is_merge is True
-
-    @patch("bb2gh.pr_migrator._commit_exists")
-    def test_falls_back_to_merge_activity(self, mock_exists):
-        mock_exists.side_effect = lambda path, sha: sha == "act222"
-        bb = MagicMock()
-        bb.get_merge_commit.return_value = None
-        bb.get_pr_activities.return_value = [
-            {"action": "COMMENTED", "comment": {"text": "hi"}},
-            {"action": "MERGED", "commit": {"id": "act222", "displayId": "act222"}},
+class TestIterCommentActivities:
+    def test_filters_and_sorts_chronologically(self):
+        activities = [
+            {"action": "COMMENTED", "comment": {"text": "second", "createdDate": 200}},
+            {"action": "APPROVED"},
+            {"action": "COMMENTED", "comment": {"text": "first", "createdDate": 100}},
+            {"action": "MERGED"},
+            {"action": "COMMENTED", "comment": {"text": "third", "createdDate": 300}},
         ]
 
-        sha, is_merge = _resolve_head_sha(bb, "/repo.git", "PROJ", "repo", self._make_pr("gone"))
+        result = list(_iter_comment_activities(activities))
 
-        assert sha == "act222"
-        assert is_merge is True
+        assert len(result) == 3
+        assert result[0]["comment"]["text"] == "first"
+        assert result[1]["comment"]["text"] == "second"
+        assert result[2]["comment"]["text"] == "third"
 
-    @patch("bb2gh.pr_migrator._commit_exists")
-    def test_returns_none_when_nothing_found(self, mock_exists):
-        mock_exists.return_value = False
-        bb = MagicMock()
-        bb.get_merge_commit.return_value = None
-        bb.get_pr_activities.return_value = []
+    def test_returns_empty_when_no_comments(self):
+        activities = [{"action": "APPROVED"}, {"action": "MERGED"}]
+        assert list(_iter_comment_activities(activities)) == []
 
-        sha, is_merge = _resolve_head_sha(bb, "/repo.git", "PROJ", "repo", self._make_pr("gone"))
 
-        assert sha is None
-        assert is_merge is False
+class TestMigrateClosedAsIssue:
+    """Closed PRs are migrated as closed GitHub Issues (no branch recreation)."""
 
-    @patch("bb2gh.pr_migrator._commit_exists")
-    def test_handles_empty_latest_commit(self, mock_exists):
-        mock_exists.return_value = False
-        bb = MagicMock()
-        bb.get_merge_commit.return_value = None
-        bb.get_pr_activities.return_value = []
+    @patch("bb2gh.pr_migrator.State")
+    @patch("bb2gh.pr_migrator.GithubClient")
+    @patch("bb2gh.pr_migrator.BitbucketClient")
+    def test_closed_pr_becomes_closed_issue(self, MockBB, MockGH, MockState, mock_config, sample_pr):
+        state_instance = MockState.return_value
+        state_instance.get_migrated_repos.return_value = [("PROJ", "my-repo")]
+        state_instance.get_github_target.return_value = ("my-org", "my-repo")
+        state_instance.is_pr_migrated.return_value = False
 
-        sha, is_merge = _resolve_head_sha(bb, "/repo.git", "PROJ", "repo", self._make_pr(""))
+        merged_pr = dict(sample_pr, id=99, state="MERGED", title="Old merged PR")
 
-        assert sha is None
-        assert is_merge is False
+        bb_instance = MockBB.return_value
+        bb_instance.list_pull_requests.side_effect = lambda proj, repo, state: {
+            "MERGED": [merged_pr], "DECLINED": [],
+        }.get(state, [])
+        bb_instance.get_pr_activities.return_value = [
+            {
+                "action": "COMMENTED",
+                "comment": {
+                    "author": {"name": "reviewer", "displayName": "Reviewer"},
+                    "text": "Great work",
+                    "createdDate": 1711234567000,
+                },
+            },
+        ]
+
+        mock_issue = MagicMock()
+        mock_issue.number = 42
+        mock_repo = MagicMock()
+        mock_repo.create_issue.return_value = mock_issue
+        MockGH.return_value.get_repo.return_value = mock_repo
+
+        migrated, _, failed = migrate_pull_requests(
+            mock_config, dry_run=False, closed_only=True,
+        )
+
+        assert migrated == 1
+        assert failed == 0
+
+        # No PR created — it's an issue
+        MockGH.return_value.create_pull_request.assert_not_called()
+
+        # Issue was created with the right title prefix
+        mock_repo.create_issue.assert_called_once()
+        issue_kwargs = mock_repo.create_issue.call_args.kwargs
+        assert "MERGED PR #99" in issue_kwargs["title"]
+        assert "Old merged PR" in issue_kwargs["title"]
+        assert "migrated-pr" in issue_kwargs["labels"]
+        assert "merged" in issue_kwargs["labels"]
+
+        # Comment was added on the issue
+        mock_issue.create_comment.assert_called_once()
+
+        # Issue was closed
+        mock_issue.edit.assert_called_once_with(state="closed")
+
+        # State recorded the mapping
+        state_instance.record_pr_mapping.assert_called_once_with(
+            "PROJ", "my-repo", 99, 42,
+        )
+
+    @patch("bb2gh.pr_migrator.State")
+    @patch("bb2gh.pr_migrator.GithubClient")
+    @patch("bb2gh.pr_migrator.BitbucketClient")
+    def test_declined_pr_labeled_declined(self, MockBB, MockGH, MockState, mock_config, sample_pr):
+        state_instance = MockState.return_value
+        state_instance.get_migrated_repos.return_value = [("PROJ", "my-repo")]
+        state_instance.get_github_target.return_value = ("my-org", "my-repo")
+        state_instance.is_pr_migrated.return_value = False
+
+        declined_pr = dict(sample_pr, id=7, state="DECLINED", title="Won't fix")
+
+        bb_instance = MockBB.return_value
+        bb_instance.list_pull_requests.side_effect = lambda proj, repo, state: {
+            "MERGED": [], "DECLINED": [declined_pr],
+        }.get(state, [])
+        bb_instance.get_pr_activities.return_value = []
+
+        mock_issue = MagicMock()
+        mock_issue.number = 8
+        mock_repo = MagicMock()
+        mock_repo.create_issue.return_value = mock_issue
+        MockGH.return_value.get_repo.return_value = mock_repo
+
+        migrate_pull_requests(mock_config, closed_only=True)
+
+        issue_kwargs = mock_repo.create_issue.call_args.kwargs
+        assert "declined" in issue_kwargs["labels"]
+
+    @patch("bb2gh.pr_migrator.State")
+    @patch("bb2gh.pr_migrator.GithubClient")
+    @patch("bb2gh.pr_migrator.BitbucketClient")
+    def test_falls_back_when_labels_missing(self, MockBB, MockGH, MockState, mock_config, sample_pr):
+        """If the labels don't exist on the repo yet, create the issue anyway."""
+        from github import GithubException
+
+        state_instance = MockState.return_value
+        state_instance.get_migrated_repos.return_value = [("PROJ", "my-repo")]
+        state_instance.get_github_target.return_value = ("my-org", "my-repo")
+        state_instance.is_pr_migrated.return_value = False
+
+        merged_pr = dict(sample_pr, id=11, state="MERGED", title="Merged x")
+
+        bb_instance = MockBB.return_value
+        bb_instance.list_pull_requests.side_effect = lambda proj, repo, state: {
+            "MERGED": [merged_pr], "DECLINED": [],
+        }.get(state, [])
+        bb_instance.get_pr_activities.return_value = []
+
+        mock_issue = MagicMock()
+        mock_issue.number = 12
+        mock_repo = MagicMock()
+        # First call (with labels) fails 422; second call (no labels) succeeds
+        mock_repo.create_issue.side_effect = [
+            GithubException(422, {"message": "label not found"}, {}),
+            mock_issue,
+        ]
+        MockGH.return_value.get_repo.return_value = mock_repo
+
+        migrated, _, failed = migrate_pull_requests(mock_config, closed_only=True)
+
+        assert migrated == 1
+        assert failed == 0
+        assert mock_repo.create_issue.call_count == 2
+        # Second call had no labels kwarg
+        second_call = mock_repo.create_issue.call_args_list[1]
+        assert "labels" not in second_call.kwargs
 
 
 class TestFormatPrBodyClosed:
