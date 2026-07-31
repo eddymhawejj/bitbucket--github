@@ -1,0 +1,181 @@
+"""Configuration loading and validation."""
+
+import os
+import yaml
+
+
+class Config:
+    """Loads and validates migration configuration from a YAML file."""
+
+    def __init__(self, path="config.yaml"):
+        with open(path) as f:
+            raw = yaml.safe_load(f)
+
+        self._validate(raw)
+        self._raw = raw
+
+        # Bitbucket settings
+        bb = raw["bitbucket"]
+        self.bb_base_url = bb["base_url"].rstrip("/")
+        self.bb_token = bb.get("token") or os.environ.get("BB_TOKEN", "")
+        self.bb_ssh_url = bb["ssh_url"].rstrip("/")
+        self.bb_ssh_hostnames = bb.get("ssh_hostnames", [])
+        self.bb_projects = bb.get("projects")  # None means all projects
+        self.bb_verify_ssl = bb.get("verify_ssl", True)
+
+        # GitHub settings
+        gh = raw["github"]
+        self.gh_base_url = gh["base_url"].rstrip("/")
+        self.gh_token = gh.get("token") or os.environ.get("GH_TOKEN", "")
+        self.gh_org = gh["org"]
+        self.gh_ssh_host = gh.get("ssh_host", "")
+        self.gh_ssh_url = gh.get("ssh_url", "")
+
+        # Sync settings
+        sync = raw.get("sync", {})
+        self.sync_interval = sync.get("interval_seconds", 60)
+        self.work_dir = sync.get("work_dir", "/data/mirror")
+        self.migrate_delay = sync.get("migrate_delay_seconds", 2)
+        self.sync_lfs_timeout = sync.get("sync_lfs_timeout_seconds", 60)
+        self.sync_exclude_projects = set(
+            p.upper() for p in sync.get("exclude_projects", [])
+        )
+        self.sync_protected_branches = sync.get("protected_branches", [])
+
+        # PR migration settings
+        pr = raw.get("pr_migration", {})
+        self.pr_api_delay = pr.get("api_delay_seconds", 0.5)
+        self.pr_pr_delay = pr.get("pr_delay_seconds", 3.0)
+        self.pr_retry_on_rate_limit = pr.get("retry_on_rate_limit", True)
+        self.pr_max_retries = pr.get("max_retries", 5)
+
+        # User mapping (Bitbucket username -> GitHub username)
+        self.user_mapping = raw.get("user_mapping", {})
+
+        # LFS settings
+        lfs = raw.get("lfs", {})
+        self.lfs_enabled = lfs.get("enabled", False)
+        self.lfs_threshold = lfs.get("threshold", "100mb")
+
+        # History trimming (repo-specific) — rewrites history, changes commit hashes
+        self.trim_history = raw.get("trim_history", {})
+
+        # Repos that need branch-by-branch push (too large for --mirror's 2GB pack limit)
+        self.push_by_branch = set(raw.get("push_by_branch", []))
+
+        # Project key aliases (old_key -> current_key) for .gitmodules remapping
+        self.project_aliases = {}
+        for old, new in raw.get("project_aliases", {}).items():
+            self.project_aliases[old.upper()] = new.upper()
+
+        # Repository mapping (Bitbucket project/repo -> GitHub org/repo)
+        rm = raw.get("repo_mapping", {})
+        self._repo_mapping = rm
+        self._name_template = rm.get("name_template", "{slug}")
+        self._project_mappings = rm.get("projects", {})
+
+    def resolve_target(self, project_key, repo_slug):
+        """Resolve a Bitbucket project/repo to a GitHub org and repo name.
+
+        Lookup order for org:
+        1. Per-repo github_org in repo_mapping.projects.<KEY>.repos.<slug>.github_org
+        2. Per-project github_org in repo_mapping.projects.<KEY>.github_org
+        3. Global github.org
+
+        Lookup order for repo name:
+        1. Per-repo github_name in repo_mapping.projects.<KEY>.repos.<slug>.github_name
+        2. Per-project name_template
+        3. Global name_template (default: "{slug}")
+
+        Returns:
+            (github_org, github_repo_name) tuple
+        """
+        project_conf = self._project_mappings.get(project_key, {})
+
+        # Resolve org
+        gh_org = project_conf.get("github_org", self.gh_org)
+
+        # Resolve repo name and org: check explicit per-repo override first
+        repos_conf = project_conf.get("repos", {})
+        if repo_slug in repos_conf:
+            repo_conf = repos_conf[repo_slug]
+            gh_org = repo_conf.get("github_org", gh_org)
+            gh_repo = repo_conf.get("github_name", repo_slug)
+        else:
+            # Use per-project template, falling back to global template
+            template = project_conf.get("name_template", self._name_template)
+            gh_repo = template.format(
+                project=project_key,
+                project_lower=project_key.lower(),
+                slug=repo_slug,
+            )
+
+        return gh_org, gh_repo
+
+    def get_trim_since(self, project_key, repo_slug):
+        """Get the --shallow-since date for a repo, or None if no trimming.
+
+        Config format:
+            trim_history:
+              UPSTREAM/linux: "2y"
+              UPSTREAM/git: "1y"
+
+        Supports: Ny (years), Nm (months), Nd (days).
+        Returns an ISO date string or None.
+        """
+        from datetime import datetime, timedelta
+
+        key = f"{project_key}/{repo_slug}"
+        period = self.trim_history.get(key)
+        if not period:
+            return None
+
+        period = period.strip().lower()
+        if period.endswith("y"):
+            delta = timedelta(days=int(period[:-1]) * 365)
+        elif period.endswith("m"):
+            delta = timedelta(days=int(period[:-1]) * 30)
+        elif period.endswith("d"):
+            delta = timedelta(days=int(period[:-1]))
+        else:
+            return None
+
+        since = datetime.now() - delta
+        return since.strftime("%Y-%m-%d")
+
+    def should_migrate_repo(self, project_key, repo_slug):
+        """Check if a repo should be migrated based on include/exclude lists.
+
+        Resolution:
+        - If `include_repos` is set for the project, the repo is migrated only
+          if it is in that list (allowlist).
+        - Otherwise, the repo is migrated unless it is in `exclude_repos`
+          (denylist).
+        - Projects with no repo filter config migrate all repos.
+
+        Returns:
+            True if the repo should be migrated.
+        """
+        project_conf = self._project_mappings.get(project_key, {})
+        include = project_conf.get("include_repos")
+        exclude = project_conf.get("exclude_repos", [])
+
+        if include is not None:
+            return repo_slug in include
+        return repo_slug not in exclude
+
+    @staticmethod
+    def _validate(raw):
+        for section in ("bitbucket", "github"):
+            if section not in raw:
+                raise ValueError(f"Missing required config section: {section}")
+
+        bb = raw["bitbucket"]
+        for key in ("base_url", "ssh_url"):
+            if key not in bb:
+                raise ValueError(f"Missing required bitbucket config: {key}")
+
+        gh = raw["github"]
+        for key in ("base_url", "org"):
+            if key not in gh:
+                raise ValueError(f"Missing required github config: {key}")

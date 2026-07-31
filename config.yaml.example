@@ -1,0 +1,115 @@
+bitbucket:
+  # Bitbucket Server base URL (no trailing slash)
+  base_url: "https://bitbucket.mycompany.com"
+  # Personal access token for REST API calls (or set BB_TOKEN env var)
+  token: "YOUR_BITBUCKET_TOKEN"
+  # SSH base URL for git clone operations
+  ssh_url: "ssh://git@bitbucket.mycompany.com:7999"
+  # Additional Bitbucket SSH hostnames (for submodule URL matching).
+  # Some .gitmodules may use a different hostname variant (e.g. with FQDN).
+  # The hostname from ssh_url is matched automatically — list extras here.
+  # ssh_hostnames:
+  #   - "bitbucket.mycompany.com"
+  #   - "bitbucket.internal.mycompany.com"
+  # Set to false if Bitbucket uses a self-signed or internal CA certificate
+  verify_ssl: true
+  # Optional: limit migration to specific projects (omit to migrate all)
+  # projects:
+  #   - PROJ1
+  #   - PROJ2
+
+github:
+  # GitHub Enterprise API base URL
+  base_url: "https://github.mycompany.com/api/v3"
+  # Personal access token with repo + admin:org scopes (or set GH_TOKEN env var)
+  token: "YOUR_GITHUB_TOKEN"
+  # Default target organization on GitHub (used when no project-specific mapping exists)
+  org: "my-org"
+  # SSH hostname for GitHub (used for submodule URL remapping)
+  ssh_host: "github.mycompany.com"
+  # SSH URL prefix for GitHub (used for push and submodule remapping)
+  # Use this if your GHE SSH user isn't "git" (e.g. ssh://myuser@host)
+  # ssh_url: "ssh://myuser@github.mycompany.com"
+
+sync:
+  # Sync interval in seconds
+  interval_seconds: 60
+  # Local directory for bare repo clones
+  work_dir: "/data/mirror"
+  # Delay between repos during migration (seconds) to avoid SSH/API rate limits
+  migrate_delay_seconds: 2
+  # Max time (seconds) for LFS migration during sync (default: 60)
+  sync_lfs_timeout_seconds: 60
+  # Branches on GitHub to protect from sync deletion (e.g., CI migration branches)
+  # When set, sync uses --all --force instead of --mirror to preserve these branches
+  # protected_branches:
+  #   - ci/github-actions-migration
+  # Projects to exclude from continuous sync (still migrated, just not synced)
+  # exclude_projects:
+  #   - UPSTREAM
+
+# Optional: map Bitbucket projects/repos to specific GitHub orgs/repo names.
+# Without this section, all repos go to github.org with their original slug as name.
+repo_mapping:
+  # Default naming template for GitHub repos.
+  # Available variables: {project}, {project_lower}, {slug}
+  # Default: "{slug}" (just the Bitbucket repo slug)
+  name_template: "{project_lower}-{slug}"
+
+  # Per-project overrides
+  projects:
+    INFRA:
+      # Send INFRA repos to a different GitHub org
+      github_org: "infra-team"
+      # Optional: override the name template for this project only
+      # name_template: "{slug}"
+      #
+      # Optional: migrate ONLY these repos from INFRA (allowlist).
+      # If set, all other repos in this project are skipped.
+      # include_repos:
+      #   - my-service
+      #   - my-api
+      repos:
+        # Optional: explicit per-repo name overrides
+        legacy-monolith:
+          github_name: "infra-monolith"
+    PLATFORM:
+      github_org: "platform-eng"
+      # Optional: migrate all repos EXCEPT these (denylist).
+      # Ignored if include_repos is set.
+      # exclude_repos:
+      #   - deprecated-tool
+      #   - archived-spike
+    # Projects not listed here use github.org and the global name_template
+
+# Optional: trim history for specific large repos.
+# Only commits within the retention period are migrated/synced.
+# HEAD commit hashes are preserved (uses git shallow clones).
+# Format: PROJECT/slug: "Ny" (years), "Nm" (months), or "Nd" (days)
+# trim_history:
+#   UPSTREAM/linux: "2y"
+#   UPSTREAM/git: "1y"
+
+# Optional: repos too large for --mirror push (>2GB pack).
+# These are pushed branch-by-branch instead.
+# push_by_branch:
+#   - UPSTREAM/linux
+#   - BGAN_UT_RM/bganut-linux
+
+# Optional: map old Bitbucket project keys to current keys.
+# Used for .gitmodules remapping when URLs reference renamed projects.
+# project_aliases:
+#   OLD_PROJECT_KEY: CURRENT_PROJECT_KEY
+
+# Optional: auto-convert large files to Git LFS before pushing to GitHub.
+# GitHub rejects files >100MB. This rewrites history to store them as LFS objects.
+lfs:
+  enabled: false
+  # Files above this size are converted to LFS pointers
+  threshold: "100mb"
+
+# Optional: map Bitbucket usernames to GitHub usernames
+# Used for PR author attribution and reviewer assignments
+# user_mapping:
+#   bb_user1: gh_user1
+#   bb_user2: gh_user2
